@@ -510,6 +510,7 @@
     }
 
     // ================= 发送到 Kindle =================
+<<<<<<< HEAD
     const SENDTOKINDLE_URL = 'https://www.amazon.com/gp/sendtokindle';
     const KINDLE_KEY = 'zip2pdf.kindleEmail';
     let kindleWin = null;   // 记录新窗口是否成功打开
@@ -559,6 +560,9 @@
         setTimeout(() => input.focus(), 60);
       });
     }
+=======
+    const KINDLE_EMAIL = '2394244128@kindle.com'; // ←★ 改成你的 Kindle 邮箱
+>>>>>>> 4e12a145eeef87c44b53a5c8c43f04450356d56a
 
     async function sendToKindle(rec) {
       const action = await openKindleModal(rec);
