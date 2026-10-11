@@ -72,7 +72,12 @@
       <div id="progressText"></div>
     </div>
     <div id="status"></div>
-    <div class="hint">单个 ZIP / 一次选择的图片合计不超过 200&nbsp;MB</div>
+    <div class="hint">单个 ZIP / 一次选择的图片合计不超过 500&nbsp;MB</div>
+  </div>
+
+  <div class="card">
+    <h2>📤 上传记录</h2>
+    <div id="uploads"></div>
   </div>
 
   <div class="card">
@@ -151,9 +156,15 @@
     // ================= IndexedDB 存储 =================
     function openDB() {
       return new Promise((res, rej) => {
-        const req = indexedDB.open('zip2pdf', 1);
+        const req = indexedDB.open('zip2pdf', 2);   // v2 起新增 uploads（上传记录）
         req.onupgradeneeded = () => {
-          req.result.createObjectStore('pdfs', { keyPath: 'id' });
+          const database = req.result;
+          if (!database.objectStoreNames.contains('pdfs')) {
+            database.createObjectStore('pdfs', { keyPath: 'id' });
+          }
+          if (!database.objectStoreNames.contains('uploads')) {
+            database.createObjectStore('uploads', { keyPath: 'id' });
+          }
         };
         req.onsuccess = () => res(req.result);
         req.onerror = rej;
@@ -176,6 +187,28 @@
       return new Promise((res, rej) => {
         const tx = db.transaction('pdfs', 'readwrite');
         tx.objectStore('pdfs').delete(id);
+        tx.oncomplete = res; tx.onerror = rej;
+      });
+    }
+
+    // ---------- 上传记录（uploads）----------
+    async function dbPutUpload(record) {
+      return new Promise((res, rej) => {
+        const tx = db.transaction('uploads', 'readwrite');
+        tx.objectStore('uploads').put(record);
+        tx.oncomplete = res; tx.onerror = rej;
+      });
+    }
+    async function dbAllUploads() {
+      return new Promise((res, rej) => {
+        const req = db.transaction('uploads').objectStore('uploads').getAll();
+        req.onsuccess = () => res(req.result); req.onerror = rej;
+      });
+    }
+    async function dbDeleteUpload(id) {
+      return new Promise((res, rej) => {
+        const tx = db.transaction('uploads', 'readwrite');
+        tx.objectStore('uploads').delete(id);
         tx.oncomplete = res; tx.onerror = rej;
       });
     }
@@ -286,7 +319,8 @@
     }
 
     // ================= 大小限制与进度条 =================
-    const MAX_BYTES = 200 * 1024 * 1024;   // 200 MB
+    const MAX_BYTES = 500 * 1024 * 1024;   // 500 MB
+    const MAX_LABEL = '500 MB';
 
     function fmtSize(bytes) {
       if (bytes >= 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
@@ -334,11 +368,15 @@
       if (!checkLibs()) return;
 
       const status = document.getElementById('status');
-      // ===== 200 MB 上限 =====
+      // ===== 500 MB 上限 =====
       if (file.size > MAX_BYTES) {
         hideProgress();
         status.innerHTML = '<span style="color:#dc2626">⚠️ 文件 ' + fmtSize(file.size) +
-          ' 超过 200 MB 上限，请拆分压缩包后再上传</span>';
+          ' 超过 ' + MAX_LABEL + ' 上限，请拆分压缩包后再上传</span>';
+        await addUpload({
+          name: file.name, size: file.size, kind: 'zip',
+          note: '超过 ' + MAX_LABEL + ' 上限，未转换', ok: false
+        });
         return;
       }
 
@@ -357,6 +395,10 @@
         if (!totalImages) {
           hideProgress();
           status.textContent = 'ZIP 里没有找到图片（支持 jpg/png/webp/bmp/gif/avif/svg 等）';
+          await addUpload({
+            name: file.name, size: file.size, kind: 'zip',
+            detail: '0 张图片', note: status.textContent, ok: false
+          });
           return;
         }
 
@@ -385,6 +427,11 @@
           status.textContent =
             `完成！已合并为 1 个 PDF（共 ${allImages.length - skipped.length} 页）` +
             skippedNote(skipped);
+          await addUpload({
+            name: file.name, size: file.size, kind: 'zip',
+            detail: totalImages + ' 张图片 · ' + groups.length + ' 个文件夹',
+            result: '1 个 PDF · ' + (allImages.length - skipped.length) + ' 页', ok: true
+          });
         } else {
           // ===== 分话模式：每个文件夹 → 第X话.pdf =====
           for (let gi = 0; gi < groups.length; gi++) {
@@ -414,10 +461,19 @@
           setProgress(100, '完成 ✔');
           status.textContent =
             `全部完成！共生成 ${groups.length} 个 PDF` + skippedNote(allSkipped);
+          await addUpload({
+            name: file.name, size: file.size, kind: 'zip',
+            detail: totalImages + ' 张图片 · ' + groups.length + ' 个文件夹',
+            result: groups.length + ' 个 PDF', ok: true
+          });
         }
         renderLibrary();
       } catch (err) {
         status.textContent = '出错了：' + err.message;
+        await addUpload({
+          name: file.name, size: file.size, kind: 'zip',
+          note: err.message, ok: false
+        });
       }
     });
 
@@ -430,12 +486,16 @@
       if (!checkLibs()) return;
       const status = document.getElementById('status');
 
-      // ===== 200 MB 上限（按本次选择的总大小）=====
+      // ===== 500 MB 上限（按本次选择的总大小）=====
       const totalBytes = files.reduce((s, f) => s + f.size, 0);
       if (totalBytes > MAX_BYTES) {
         hideProgress();
         status.innerHTML = '<span style="color:#dc2626">⚠️ 所选图片合计 ' + fmtSize(totalBytes) +
-          ' 超过 200 MB 上限，请少选一些</span>';
+          ' 超过 ' + MAX_LABEL + ' 上限，请少选一些</span>';
+        await addUpload({
+          name: files.length + ' 张图片', size: totalBytes, kind: 'images',
+          detail: files.length + ' 张', note: '超过 ' + MAX_LABEL + ' 上限，未转换', ok: false
+        });
         return;
       }
 
@@ -462,11 +522,72 @@
         setProgress(100, '完成 ✔');
         status.textContent =
           `完成！${items.length - skipped.length} 张图已合成 1 个 PDF` + skippedNote(skipped);
+        await addUpload({
+          name: files.length + ' 张图片', size: totalBytes, kind: 'images',
+          detail: files.length + ' 张',
+          result: '1 个 PDF · ' + (items.length - skipped.length) + ' 页', ok: true
+        });
         renderLibrary();
       } catch (err) {
         status.textContent = '出错了：' + err.message;
+        await addUpload({
+          name: files.length + ' 张图片', size: totalBytes, kind: 'images',
+          detail: files.length + ' 张', note: err.message, ok: false
+        });
       }
     });
+
+    // ================= 上传记录 =================
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    // info: { name, size, kind:'zip'|'images', detail?, result?, note?, ok }
+    async function addUpload(info) {
+      await dbPutUpload({
+        id: 'u-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+        name: info.name,
+        size: info.size,
+        kind: info.kind,
+        detail: info.detail || '',
+        result: info.result || '',
+        note: info.note || '',
+        ok: !!info.ok,
+        createdAt: new Date().toLocaleString('zh-CN')
+      });
+      renderUploads();
+    }
+
+    async function renderUploads() {
+      const list = await dbAllUploads();
+      const el = document.getElementById('uploads');
+      if (!list.length) {
+        el.innerHTML = '<div class="empty">还没有上传记录</div>';
+        return;
+      }
+      el.innerHTML = '';
+      list.sort((a, b) => (b.id + '').localeCompare(a.id + '', undefined, { numeric: true }))
+        .forEach(rec => {
+          const div = document.createElement('div');
+          div.className = 'item';
+          const icon = rec.kind === 'zip' ? '📦' : '🖼️';
+          const badge = rec.ok
+            ? '<span style="color:#059669">✅ ' + escapeHtml(rec.result || '成功') + '</span>'
+            : '<span style="color:#dc2626">❌ ' + escapeHtml(rec.note || '失败') + '</span>';
+          div.innerHTML =
+            '<div class="name">' + icon + ' ' + escapeHtml(rec.name) + '</div>' +
+            '<div class="meta">' + rec.createdAt + ' · ' + fmtSize(rec.size) +
+              (rec.detail ? ' · ' + escapeHtml(rec.detail) : '') + '</div>' +
+            '<div class="meta">' + badge + '</div>' +
+            '<div class="ops"><button class="btn small danger" data-act="delup">删除记录</button></div>';
+          div.querySelector('[data-act=delup]').onclick = async () => {
+            await dbDeleteUpload(rec.id);
+            renderUploads();
+          };
+          el.appendChild(div);
+        });
+    }
 
     // ================= PDF 库列表 =================
     async function renderLibrary() {
@@ -613,11 +734,13 @@
       checkLibs();
       try {
         db = await openDB();
+        renderUploads();
         renderLibrary();
       } catch (e) {
         // file:// 直接打开、或隐私模式下 IndexedDB 可能不可用
-        document.getElementById('library').innerHTML =
-          '<div class="empty">⚠️ 本地存储不可用（请用 http/https 网址访问，不要直接双击打开文件）</div>';
+        const tip = '<div class="empty">⚠️ 本地存储不可用（请用 http/https 网址访问，不要直接双击打开文件）</div>';
+        document.getElementById('uploads').innerHTML = tip;
+        document.getElementById('library').innerHTML = tip;
       }
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('sw.js').catch(() => {});
