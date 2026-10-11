@@ -34,11 +34,14 @@
 </head>
 <body>
   <h1>📷 ZIP 转 PDF</h1>
-  <p class="tip">文件夹按顺序对应话数 · 可合并为一个 PDF · 可重命名</p>
+  <p class="tip">支持 jpg / png / webp / bmp / gif / avif / svg<br>文件夹按顺序对应话数 · 可合并为一个 PDF · 可重命名</p>
 
   <div class="card">
-    <input type="file" id="fileInput" accept=".zip,application/zip">
+    <input type="file" id="fileInput" accept=".zip,application/zip,application/x-zip-compressed">
+    <input type="file" id="imgInput" accept="image/*" multiple>
     <button class="btn" onclick="document.getElementById('fileInput').click()">选择 ZIP 文件</button>
+    <button class="btn gray" style="margin-left:8px"
+            onclick="document.getElementById('imgInput').click()">或直接选图片</button>
     <div class="opt" style="margin-top:14px">
       <input type="checkbox" id="mergeChk" checked>
       <label for="mergeChk">合并 ZIP 内所有文件夹为一个 PDF</label>
@@ -141,11 +144,17 @@
     }
 
     // ================= 分组：按顶层文件夹分组 =================
+    // 支持的图片扩展名（浏览器 canvas 可解码的都列入；
+    // heic/tiff 等无法原生解码的格式会被识别并在转换时跳过并提示）
+    const IMAGE_RE = /\.(jpe?g|jpe|png|webp|bmp|gif|avif|ico|svg|tiff?|heic|heif)$/i;
+
     function groupByFolder(zip) {
       const groups = new Map();
       const entries = Object.values(zip.files).filter(f => !f.dir);
       for (const f of entries) {
-        if (!/\.(jpe?g|png|webp|bmp)$/i.test(f.name)) continue;
+        if (!IMAGE_RE.test(f.name)) continue;
+        // 跳过 macOS 打包产生的缩略图与隐藏文件
+        if (/__MACOSX/i.test(f.name) || /(^|\/)\.[^/]/.test(f.name)) continue;
         const parts = f.name.split('/');
         const folder = parts.length > 1 ? parts[0] : '';
         if (!groups.has(folder)) groups.set(folder, []);
@@ -171,25 +180,82 @@
       return m ? parseInt(m[0], 10) : null;
     }
 
+    // 统一输出质量（canvas 重编码用，0.92 肉眼几乎无损且体积可控）
+    const JPEG_QUALITY = 0.92;
+
+    // ================= 把任意浏览器可解码的图片转成 JPEG dataURL =================
+    // 1) 白底填充：PNG/WebP/GIF 的透明区域转成 JPEG 后不会变黑
+    // 2) 统一成 JPEG：jsPDF 用 DCTDecode 嵌入，体积最小、兼容性最好
+    function toJpegDataURL(blob) {
+      return new Promise((res, rej) => {
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          try {
+            // SVG 未声明尺寸时浏览器会给出 0，兜底为 1024
+            const w = img.naturalWidth || 1024;
+            const h = img.naturalHeight || 1024;
+            const c = document.createElement('canvas');
+            c.width = w; c.height = h;
+            const g = c.getContext('2d');
+            g.fillStyle = '#ffffff';
+            g.fillRect(0, 0, w, h);
+            g.drawImage(img, 0, 0, w, h);
+            const dataUrl = c.toDataURL('image/jpeg', JPEG_QUALITY);
+            // 超大图在 iOS 上可能导出失败，返回近乎空串
+            if (!dataUrl || dataUrl.length < 200) {
+              rej(new Error('图片过大，浏览器无法处理'));
+            } else {
+              res({ dataUrl, width: w, height: h });
+            }
+          } catch (err) { rej(err); }
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          rej(new Error('浏览器无法解码该图片格式'));
+        };
+        img.src = url;
+      });
+    }
+
     // ================= 生成一个 PDF =================
+    // 返回 { blob, skipped }：skipped 为解码失败被跳过的文件名
     async function buildPDF(images, onProgress) {
       const jsPDF = window.jspdf && window.jspdf.jsPDF;
       if (!jsPDF) throw new Error('jsPDF 未加载，请检查 vendor/jspdf.umd.min.js');
       let doc = null;
+      const skipped = [];
       for (let i = 0; i < images.length; i++) {
         onProgress(i);
-        const blob = await images[i].async('blob');
-        const dataUrl = await blobToDataURL(blob);
-        const img = await loadImage(dataUrl);
-        const orient = img.width >= img.height ? 'landscape' : 'portrait';
-        if (!doc) {
-          doc = new jsPDF({ orientation: orient, unit: 'px', format: [img.width, img.height] });
-        } else {
-          doc.addPage([img.width, img.height], orient);
+        let out;
+        try {
+          const blob = await images[i].async('blob');
+          out = await toJpegDataURL(blob);
+        } catch (err) {
+          skipped.push(images[i].name);
+          continue;
         }
-        doc.addImage(dataUrl, 'JPEG', 0, 0, img.width, img.height);
+        const orient = out.width >= out.height ? 'landscape' : 'portrait';
+        if (!doc) {
+          doc = new jsPDF({ orientation: orient, unit: 'px', format: [out.width, out.height] });
+        } else {
+          doc.addPage([out.width, out.height], orient);
+        }
+        doc.addImage(out.dataUrl, 'JPEG', 0, 0, out.width, out.height);
       }
-      return doc.output('blob');
+      if (!doc) throw new Error('没有可用的图片（格式可能全部不被支持）');
+      return { blob: doc.output('blob'), skipped };
+    }
+
+    // ================= 被跳过的图片的提示文案 =================
+    function skippedNote(skipped) {
+      if (!skipped || !skipped.length) return '';
+      const heic = skipped.filter(n => /\.hei[cf]$/i.test(n)).length;
+      if (heic) {
+        return `｜跳过 ${skipped.length} 张（含 ${heic} 张 HEIC/HEIF，浏览器无法解码，请先转成 JPG）`;
+      }
+      return `｜跳过 ${skipped.length} 张无法解码的图片`;
     }
 
     // ================= 转换主流程 =================
@@ -205,18 +271,24 @@
         const zip = await JSZip.loadAsync(file);
         const groups = groupByFolder(zip);
         const totalImages = groups.reduce((s, g) => s + g.images.length, 0);
-        if (!totalImages) { status.textContent = 'ZIP 里没有找到图片'; return; }
+        if (!totalImages) {
+          status.textContent = 'ZIP 里没有找到图片（支持 jpg/png/webp/bmp/gif/avif/svg 等）';
+          return;
+        }
 
         const baseName = file.name.replace(/\.zip$/i, '');
         const startChapter = parseStartChapter(baseName);
         let done = 0;
 
+        let allSkipped = [];
+
         if (merge) {
           // ===== 合并模式：所有文件夹 → 一个 PDF，名字 = zip 名 =====
           const allImages = groups.flatMap(g => g.images);
-          const pdfBlob = await buildPDF(allImages, (i) => {
+          const { blob: pdfBlob, skipped } = await buildPDF(allImages, (i) => {
             status.textContent = `合并转换：处理中 ${i + 1}/${allImages.length}`;
           });
+          allSkipped = skipped;
           await dbPut({
             id: Date.now() + '',
             name: `${baseName}.pdf`,
@@ -225,7 +297,9 @@
             sent: false,
             blob: pdfBlob
           });
-          status.textContent = `完成！已合并为 1 个 PDF（共 ${allImages.length} 页）`;
+          status.textContent =
+            `完成！已合并为 1 个 PDF（共 ${allImages.length - skipped.length} 页）` +
+            skippedNote(skipped);
         } else {
           // ===== 分话模式：每个文件夹 → 第X话.pdf =====
           for (let gi = 0; gi < groups.length; gi++) {
@@ -234,9 +308,10 @@
               ? `第${startChapter + gi}话.pdf`
               : (groups.length > 1 ? `${baseName}-${gi + 1}.pdf` : `${baseName}.pdf`);
 
-            const pdfBlob = await buildPDF(g.images, (i) => {
+            const { blob: pdfBlob, skipped } = await buildPDF(g.images, (i) => {
               status.textContent = `第 ${gi + 1}/${groups.length} 个 PDF：处理中 ${i + 1}/${g.images.length}`;
             });
+            allSkipped = allSkipped.concat(skipped);
             done += g.images.length;
 
             await dbPut({
@@ -249,13 +324,49 @@
             });
             renderLibrary();
           }
-          status.textContent = `全部完成！共生成 ${groups.length} 个 PDF`;
+          status.textContent =
+            `全部完成！共生成 ${groups.length} 个 PDF` + skippedNote(allSkipped);
         }
         renderLibrary();
       } catch (err) {
         status.textContent = '出错了：' + err.message;
       }
       e.target.value = '';
+    });
+
+    // ================= 直接选图片 → 合成一个 PDF =================
+    document.getElementById('imgInput').addEventListener('change', async (e) => {
+      const files = Array.from(e.target.files || []);
+      e.target.value = '';
+      if (!files.length) return;
+      await ensureLibs();
+      if (!checkLibs()) return;
+      const status = document.getElementById('status');
+      status.textContent = '正在转换图片…';
+      try {
+        // 按文件名自然排序，保证 1.jpg / 2.jpg / 10.jpg 顺序正确
+        files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+        // 包装成与 JSZip 条目一致的结构，复用 buildPDF
+        const items = files.map(f => ({ name: f.name, async: () => Promise.resolve(f) }));
+        const { blob: pdfBlob, skipped } = await buildPDF(items, (i) => {
+          status.textContent = `转换中 ${i + 1}/${items.length}`;
+        });
+        const d = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        await dbPut({
+          id: 'img-' + Date.now(),
+          name: `图片_${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}.pdf`,
+          size: pdfBlob.size,
+          createdAt: d.toLocaleString('zh-CN'),
+          sent: false,
+          blob: pdfBlob
+        });
+        status.textContent =
+          `完成！${items.length - skipped.length} 张图已合成 1 个 PDF` + skippedNote(skipped);
+        renderLibrary();
+      } catch (err) {
+        status.textContent = '出错了：' + err.message;
+      }
     });
 
     // ================= PDF 库列表 =================
@@ -332,22 +443,6 @@
       if (!confirm(`删除「${rec.name}」？\n（App 内副本会被删除；已下载到手机里的原件请自行删除）`)) return;
       await dbDelete(rec.id);
       renderLibrary();
-    }
-
-    // ================= 工具函数 =================
-    function blobToDataURL(blob) {
-      return new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onload = () => res(r.result); r.onerror = rej;
-        r.readAsDataURL(blob);
-      });
-    }
-    function loadImage(src) {
-      return new Promise((res, rej) => {
-        const img = new Image();
-        img.onload = () => res(img); img.onerror = rej;
-        img.src = src;
-      });
     }
 
     // ================= 初始化 =================
