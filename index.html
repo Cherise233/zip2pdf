@@ -36,6 +36,16 @@
     .item .meta { font-size: 12px; color: #9ca3af; margin: 4px 0 8px; }
     .item .ops { display: flex; gap: 8px; flex-wrap: wrap; }
     .empty { color: #9ca3af; font-size: 14px; text-align: center; padding: 16px 0; }
+    .modal-mask { position: fixed; inset: 0; background: rgba(17,24,39,.5);
+      display: none; align-items: center; justify-content: center; padding: 20px; z-index: 50; }
+    .modal { background: #fff; border-radius: 16px; padding: 22px; width: 100%; max-width: 360px; }
+    .modal h3 { font-size: 17px; color: #1f2937; margin-bottom: 8px; }
+    .modal p { font-size: 13px; color: #6b7280; line-height: 1.6; margin-bottom: 12px; }
+    .modal input[type=email] { width: 100%; padding: 11px 12px; font-size: 15px;
+      border: 1px solid #d1d5db; border-radius: 10px; outline: none; }
+    .modal input[type=email]:focus { border-color: #4f46e5; }
+    .modal-ops { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+    .modal-ops .btn { flex: 1; text-align: center; min-width: 100px; }
   </style>
 </head>
 <body>
@@ -68,6 +78,22 @@
   <div class="card">
     <h2>我的 PDF 库</h2>
     <div id="library"></div>
+  </div>
+
+  <div class="modal-mask" id="modal">
+    <div class="modal">
+      <h3>发到 Kindle</h3>
+      <p>填入你的 Send to Kindle 邮箱（形如 xxx@kindle.com），会记住，下次不用再填。</p>
+      <input type="email" id="kindleEmailInput" placeholder="xxx@kindle.com" autocomplete="email">
+      <div class="modal-ops">
+        <button class="btn gray" id="modalCancel">取消</button>
+        <button class="btn" id="modalShare" style="display:none">用系统分享</button>
+        <button class="btn" id="modalOk">继续</button>
+      </div>
+      <p style="margin:12px 0 0;font-size:12px">
+        继续 = 打开 Amazon 官方上传页，同时把 PDF 存一份到本机方便选择
+      </p>
+    </div>
   </div>
 
   <script src="vendor/jszip.min.js"></script>
@@ -484,32 +510,95 @@
     }
 
     // ================= 发送到 Kindle =================
-    const KINDLE_EMAIL = '你的Kindle邮箱@kindle.com'; // ←★ 改成你的 Kindle 邮箱
+    const SENDTOKINDLE_URL = 'https://www.amazon.com/gp/sendtokindle';
+    const KINDLE_KEY = 'zip2pdf.kindleEmail';
+    let kindleWin = null;   // 记录新窗口是否成功打开
+
+    // 弹出邮箱输入框，返回 'open' | 'share' | null（取消）
+    function openKindleModal(rec) {
+      return new Promise(res => {
+        const mask = document.getElementById('modal');
+        const input = document.getElementById('kindleEmailInput');
+        const okBtn = document.getElementById('modalOk');
+        const cancelBtn = document.getElementById('modalCancel');
+        const shareBtn = document.getElementById('modalShare');
+
+        input.value = localStorage.getItem(KINDLE_KEY) || '';
+        input.placeholder = 'xxx@kindle.com';
+
+        // 浏览器支持文件分享时才显示「用系统分享」
+        const file = new File([rec.blob], rec.name, { type: 'application/pdf' });
+        const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
+        shareBtn.style.display = canShare ? '' : 'none';
+
+        mask.style.display = 'flex';
+
+        const finish = action => {
+          mask.style.display = 'none';
+          okBtn.onclick = cancelBtn.onclick = shareBtn.onclick = null;
+          res(action);
+        };
+
+        cancelBtn.onclick = () => finish(null);
+        shareBtn.onclick = () => finish('share');
+        okBtn.onclick = () => {
+          const v = input.value.trim();
+          if (!v) {
+            input.placeholder = '请先填写 Kindle 邮箱';
+            input.focus();
+            return;
+          }
+          localStorage.setItem(KINDLE_KEY, v);
+          // 在用户点击的同步上下文里打开，避免被浏览器拦截
+          kindleWin = window.open(SENDTOKINDLE_URL, '_blank', 'noopener');
+          finish('open');
+        };
+
+        // 点击遮罩空白处关闭
+        mask.onclick = e => { if (e.target === mask) finish(null); };
+        setTimeout(() => input.focus(), 60);
+      });
+    }
 
     async function sendToKindle(rec) {
-      const file = new File([rec.blob], rec.name, { type: 'application/pdf' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      const action = await openKindleModal(rec);
+      if (!action) return;
+      const status = document.getElementById('status');
+      const email = localStorage.getItem(KINDLE_KEY) || '';
+
+      if (action === 'share') {
+        const file = new File([rec.blob], rec.name, { type: 'application/pdf' });
         try {
           await navigator.share({ files: [file], title: rec.name });
           await dbPut({ ...rec, sent: true });
           renderLibrary();
           return;
         } catch (e) {
-          if (e.name === 'AbortError') return; // 用户取消
+          if (e.name === 'AbortError') return; // 用户取消分享
         }
       }
-      // 降级：下载后手动用邮件 App 发
+
+      // 主路径：已打开官方上传页，同时下载一份 PDF 到本机，方便在网页里选择上传
       download(rec);
-      alert('此浏览器不支持直接分享文件。\n已为你下载 PDF，请用邮件 App 把它发给：\n' + KINDLE_EMAIL);
+      status.innerHTML = kindleWin
+        ? '✅ 已打开 Send to Kindle 网页（新标签页）'
+        : '⚠️ 浏览器拦截了新窗口，请手动打开：' + SENDTOKINDLE_URL;
+      status.innerHTML += '<br>PDF 也已存到本机，可在网页里选择上传；' +
+        '或用邮件 App 把它作为附件发给 <b>' + email + '</b>';
+      await dbPut({ ...rec, sent: true });
+      renderLibrary();
     }
 
     // ================= 下载 / 删除 =================
     function download(rec) {
+      const url = URL.createObjectURL(rec.blob);
       const a = document.createElement('a');
-      a.href = URL.createObjectURL(rec.blob);
+      a.href = url;
       a.download = rec.name;
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(a.href);
+      // 延迟释放，立即 revoke 会导致部分浏览器下载失败
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
     }
 
     async function remove(rec) {
