@@ -1,4 +1,4 @@
-const CACHE = 'zip2pdf-v5';   // 更新代码后递增版本号，手机端才会刷新
+const CACHE = 'zip2pdf-v6';   // 更新代码后递增版本号，手机端才会刷新
 const ASSETS = [
   './',
   './index.html',
