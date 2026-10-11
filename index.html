@@ -22,6 +22,12 @@
     .btn.danger { background: #dc2626; }
     .btn.gray { background: #6b7280; }
     #status { margin-top: 14px; color: #374151; font-size: 14px; min-height: 20px; }
+    .bar-wrap { margin-top: 14px; display: none; }
+    .bar { height: 10px; background: #e5e7eb; border-radius: 999px; overflow: hidden; }
+    .bar-fill { height: 100%; width: 0%; border-radius: 999px;
+      background: linear-gradient(90deg, #818cf8, #4f46e5); transition: width .12s linear; }
+    #progressText { margin-top: 6px; font-size: 13px; color: #4b5563; }
+    .hint { font-size: 12px; color: #9ca3af; margin-top: 10px; }
     h2 { font-size: 17px; color: #1f2937; margin-bottom: 12px; }
     .opt { display: flex; align-items: center; gap: 10px; font-size: 15px; color: #1f2937; }
     .opt input { width: 20px; height: 20px; accent-color: #4f46e5; }
@@ -51,7 +57,12 @@
         不勾选时，每个文件夹生成一个 PDF，按 zip 文件名中的起始数字命名为「第X话」
       </span>
     </div>
+    <div class="bar-wrap" id="barWrap">
+      <div class="bar"><div class="bar-fill" id="barFill"></div></div>
+      <div id="progressText"></div>
+    </div>
     <div id="status"></div>
+    <div class="hint">单个 ZIP / 一次选择的图片合计不超过 200&nbsp;MB</div>
   </div>
 
   <div class="card">
@@ -248,6 +259,36 @@
       return { blob: doc.output('blob'), skipped };
     }
 
+    // ================= 大小限制与进度条 =================
+    const MAX_BYTES = 200 * 1024 * 1024;   // 200 MB
+
+    function fmtSize(bytes) {
+      if (bytes >= 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+      return Math.max(1, Math.round(bytes / 1024)) + ' KB';
+    }
+
+    // percent: 0~100；label: 当前阶段说明
+    function setProgress(percent, label) {
+      document.getElementById('barWrap').style.display = 'block';
+      document.getElementById('barFill').style.width =
+        Math.max(0, Math.min(100, percent)).toFixed(1) + '%';
+      document.getElementById('progressText').textContent = label || '';
+    }
+    function hideProgress() {
+      document.getElementById('barWrap').style.display = 'none';
+    }
+
+    // 读取文件并回报真实读取进度（FileReader.onprogress）
+    function readFileWithProgress(file, onProgress) {
+      return new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+        r.onload = () => res(r.result);
+        r.onerror = () => rej(new Error('文件读取失败'));
+        r.readAsArrayBuffer(file);
+      });
+    }
+
     // ================= 被跳过的图片的提示文案 =================
     function skippedNote(skipped) {
       if (!skipped || !skipped.length) return '';
@@ -261,32 +302,49 @@
     // ================= 转换主流程 =================
     document.getElementById('fileInput').addEventListener('change', async (e) => {
       const file = e.target.files[0];
+      e.target.value = '';
       if (!file) return;
       await ensureLibs();
-      if (!checkLibs()) { e.target.value = ''; return; }
-      const merge = document.getElementById('mergeChk').checked;
+      if (!checkLibs()) return;
+
       const status = document.getElementById('status');
-      status.textContent = '正在解压…';
+      // ===== 200 MB 上限 =====
+      if (file.size > MAX_BYTES) {
+        hideProgress();
+        status.innerHTML = '<span style="color:#dc2626">⚠️ 文件 ' + fmtSize(file.size) +
+          ' 超过 200 MB 上限，请拆分压缩包后再上传</span>';
+        return;
+      }
+
+      const merge = document.getElementById('mergeChk').checked;
+      setProgress(0, '读取文件中…（' + fmtSize(file.size) + '）');
+      status.textContent = '';
       try {
-        const zip = await JSZip.loadAsync(file);
+        // 阶段一：读取文件（真实进度，占前 15%）
+        const buf = await readFileWithProgress(file, p => {
+          setProgress(p * 15, '读取文件中… ' + Math.round(p * 100) + '%（' + fmtSize(file.size) + '）');
+        });
+        setProgress(15, '解析压缩包…');
+        const zip = await JSZip.loadAsync(buf);
         const groups = groupByFolder(zip);
         const totalImages = groups.reduce((s, g) => s + g.images.length, 0);
         if (!totalImages) {
+          hideProgress();
           status.textContent = 'ZIP 里没有找到图片（支持 jpg/png/webp/bmp/gif/avif/svg 等）';
           return;
         }
 
         const baseName = file.name.replace(/\.zip$/i, '');
         const startChapter = parseStartChapter(baseName);
-        let done = 0;
-
+        let convDone = 0;      // 跨 PDF 累计已处理页数，用于总体进度
         let allSkipped = [];
 
         if (merge) {
           // ===== 合并模式：所有文件夹 → 一个 PDF，名字 = zip 名 =====
           const allImages = groups.flatMap(g => g.images);
           const { blob: pdfBlob, skipped } = await buildPDF(allImages, (i) => {
-            status.textContent = `合并转换：处理中 ${i + 1}/${allImages.length}`;
+            setProgress(15 + (i + 1) / allImages.length * 85,
+              '转换图片 ' + (i + 1) + '/' + allImages.length);
           });
           allSkipped = skipped;
           await dbPut({
@@ -297,6 +355,7 @@
             sent: false,
             blob: pdfBlob
           });
+          setProgress(100, '完成 ✔');
           status.textContent =
             `完成！已合并为 1 个 PDF（共 ${allImages.length - skipped.length} 页）` +
             skippedNote(skipped);
@@ -308,11 +367,13 @@
               ? `第${startChapter + gi}话.pdf`
               : (groups.length > 1 ? `${baseName}-${gi + 1}.pdf` : `${baseName}.pdf`);
 
-            const { blob: pdfBlob, skipped } = await buildPDF(g.images, (i) => {
-              status.textContent = `第 ${gi + 1}/${groups.length} 个 PDF：处理中 ${i + 1}/${g.images.length}`;
+            const { blob: pdfBlob, skipped } = await buildPDF(g.images, () => {
+              convDone++;
+              setProgress(15 + convDone / totalImages * 85,
+                '转换中 ' + convDone + '/' + totalImages +
+                '（第 ' + (gi + 1) + '/' + groups.length + ' 个 PDF）');
             });
             allSkipped = allSkipped.concat(skipped);
-            done += g.images.length;
 
             await dbPut({
               id: Date.now() + '-' + gi,
@@ -324,6 +385,7 @@
             });
             renderLibrary();
           }
+          setProgress(100, '完成 ✔');
           status.textContent =
             `全部完成！共生成 ${groups.length} 个 PDF` + skippedNote(allSkipped);
         }
@@ -331,7 +393,6 @@
       } catch (err) {
         status.textContent = '出错了：' + err.message;
       }
-      e.target.value = '';
     });
 
     // ================= 直接选图片 → 合成一个 PDF =================
@@ -342,14 +403,25 @@
       await ensureLibs();
       if (!checkLibs()) return;
       const status = document.getElementById('status');
-      status.textContent = '正在转换图片…';
+
+      // ===== 200 MB 上限（按本次选择的总大小）=====
+      const totalBytes = files.reduce((s, f) => s + f.size, 0);
+      if (totalBytes > MAX_BYTES) {
+        hideProgress();
+        status.innerHTML = '<span style="color:#dc2626">⚠️ 所选图片合计 ' + fmtSize(totalBytes) +
+          ' 超过 200 MB 上限，请少选一些</span>';
+        return;
+      }
+
+      setProgress(0, '准备中…（' + files.length + ' 张，' + fmtSize(totalBytes) + '）');
+      status.textContent = '';
       try {
         // 按文件名自然排序，保证 1.jpg / 2.jpg / 10.jpg 顺序正确
         files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
         // 包装成与 JSZip 条目一致的结构，复用 buildPDF
         const items = files.map(f => ({ name: f.name, async: () => Promise.resolve(f) }));
         const { blob: pdfBlob, skipped } = await buildPDF(items, (i) => {
-          status.textContent = `转换中 ${i + 1}/${items.length}`;
+          setProgress((i + 1) / items.length * 100, '转换图片 ' + (i + 1) + '/' + items.length);
         });
         const d = new Date();
         const pad = n => String(n).padStart(2, '0');
@@ -361,6 +433,7 @@
           sent: false,
           blob: pdfBlob
         });
+        setProgress(100, '完成 ✔');
         status.textContent =
           `完成！${items.length - skipped.length} 张图已合成 1 个 PDF` + skippedNote(skipped);
         renderLibrary();
