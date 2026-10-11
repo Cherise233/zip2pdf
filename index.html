@@ -56,10 +56,24 @@
     <div id="library"></div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
+  <script src="vendor/jszip.min.js"></script>
+  <script src="vendor/jspdf.umd.min.js"></script>
   <script>
     let db = null;
+
+    // 依赖库自检（本地 vendor 加载失败时给出明确提示）
+    function checkLibs() {
+      const missing = [];
+      if (typeof JSZip === 'undefined') missing.push('JSZip');
+      if (!window.jspdf || !window.jspdf.jsPDF) missing.push('jsPDF');
+      if (missing.length) {
+        document.getElementById('status').innerHTML =
+          '<span style="color:#dc2626">⚠️ 依赖库加载失败：' + missing.join('、') +
+          '<br>请确认 vendor/ 目录已随网页一起上传（GitHub Pages 需包含该文件夹）</span>';
+        return false;
+      }
+      return true;
+    }
 
     // ================= IndexedDB 存储 =================
     function openDB() {
@@ -126,7 +140,8 @@
 
     // ================= 生成一个 PDF =================
     async function buildPDF(images, onProgress) {
-      const { jsPDF } = window.jspdf;
+      const jsPDF = window.jspdf && window.jspdf.jsPDF;
+      if (!jsPDF) throw new Error('jsPDF 未加载，请检查 vendor/jspdf.umd.min.js');
       let doc = null;
       for (let i = 0; i < images.length; i++) {
         onProgress(i);
@@ -148,6 +163,7 @@
     document.getElementById('fileInput').addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
+      if (!checkLibs()) { e.target.value = ''; return; }
       const merge = document.getElementById('mergeChk').checked;
       const status = document.getElementById('status');
       status.textContent = '正在解压…';
@@ -302,6 +318,7 @@
 
     // ================= 初始化 =================
     (async () => {
+      checkLibs();
       db = await openDB();
       renderLibrary();
       if ('serviceWorker' in navigator) {
