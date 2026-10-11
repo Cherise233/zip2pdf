@@ -616,7 +616,7 @@
           : '';
         div.innerHTML = `
           <div class="name">${rec.name}</div>
-          <div class="meta">创建：${rec.createdAt} · ${(rec.size / 1024 / 1024).toFixed(2)} MB
+          <div class="meta">${rec.createdAt} · ${(rec.size / 1024 / 1024).toFixed(2)} MB
             · ${rec.sent ? '✅ 已发 Kindle' : '⬜ 未发送'}</div>
           ${bigWarn}
           <div class="ops">
