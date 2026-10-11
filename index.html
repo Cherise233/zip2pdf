@@ -14,7 +14,7 @@
     p.tip { text-align: center; color: #6b7280; font-size: 13px; margin-bottom: 20px; }
     .card { background: #fff; border-radius: 16px; padding: 24px;
       max-width: 480px; margin: 0 auto 20px; box-shadow: 0 4px 12px rgba(0,0,0,.08); }
-    #fileInput { display: none; }
+    #fileInput, #imgInput { display: none; }
     .btn { display: inline-block; background: #4f46e5; color: #fff; border: none;
       border-radius: 12px; padding: 12px 22px; font-size: 15px; cursor: pointer; }
     .btn:disabled { background: #9ca3af; }
@@ -510,7 +510,6 @@
     }
 
     // ================= 发送到 Kindle =================
-<<<<<<< HEAD
     const SENDTOKINDLE_URL = 'https://www.amazon.com/gp/sendtokindle';
     const KINDLE_KEY = 'zip2pdf.kindleEmail';
     let kindleWin = null;   // 记录新窗口是否成功打开
@@ -560,9 +559,6 @@
         setTimeout(() => input.focus(), 60);
       });
     }
-=======
-    const KINDLE_EMAIL = '2394244128@kindle.com'; // ←★ 改成你的 Kindle 邮箱
->>>>>>> 4e12a145eeef87c44b53a5c8c43f04450356d56a
 
     async function sendToKindle(rec) {
       const action = await openKindleModal(rec);
