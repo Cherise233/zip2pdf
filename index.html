@@ -432,7 +432,7 @@
           });
           setProgress(100, '完成 ✔');
           status.textContent =
-            `完成！已合并为 1 个 PDF（共 ${allImages.length - skipped.length} 页）` +
+            `已合并为 1 个 PDF（共 ${allImages.length - skipped.length} 页）` +
             skippedNote(skipped);
           await addUpload({
             name: file.name, size: file.size, kind: 'zip',
@@ -465,9 +465,9 @@
             });
             renderLibrary();
           }
-          setProgress(100, '完成 ✔');
+          setProgress(100, '全部完成 ✔');
           status.textContent =
-            `全部完成！共生成 ${groups.length} 个 PDF` + skippedNote(allSkipped);
+            `共生成 ${groups.length} 个 PDF` + skippedNote(allSkipped);
           await addUpload({
             name: file.name, size: file.size, kind: 'zip',
             detail: totalImages + ' 张图片 · ' + groups.length + ' 个文件夹',
@@ -528,7 +528,7 @@
         });
         setProgress(100, '完成 ✔');
         status.textContent =
-          `完成！${items.length - skipped.length} 张图已合成 1 个 PDF` + skippedNote(skipped);
+          `${items.length - skipped.length} 张图已合成 1 个 PDF` + skippedNote(skipped);
         await addUpload({
           name: files.length + ' 张图片', size: totalBytes, kind: 'images',
           detail: files.length + ' 张',
