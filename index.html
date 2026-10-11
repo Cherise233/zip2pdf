@@ -61,6 +61,39 @@
   <script>
     let db = null;
 
+    // ============ 依赖库兜底加载 ============
+    // 优先用随页面一起上传的 vendor/ 本地库；若缺失（例如上传时漏了该目录）
+    // 则自动回退到公共 CDN，保证在任何静态空间都能跑起来。
+    const LIBS = [
+      {
+        name: 'JSZip',
+        ok: () => typeof JSZip !== 'undefined',
+        local: 'vendor/jszip.min.js',
+        cdn: 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
+      },
+      {
+        name: 'jsPDF',
+        ok: () => !!(window.jspdf && window.jspdf.jsPDF),
+        local: 'vendor/jspdf.umd.min.js',
+        cdn: 'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js'
+      }
+    ];
+    function loadScript(src) {
+      return new Promise((res, rej) => {
+        const s = document.createElement('script');
+        s.src = src; s.onload = res; s.onerror = () => rej(new Error(src));
+        document.head.appendChild(s);
+      });
+    }
+    async function ensureLibs() {
+      for (const lib of LIBS) {
+        if (lib.ok()) continue;
+        try { await loadScript(lib.local); } catch (e) { /* 本地缺失 */ }
+        if (lib.ok()) continue;
+        try { await loadScript(lib.cdn); } catch (e) { /* CDN 也失败 */ }
+      }
+    }
+
     // 依赖库自检（本地 vendor 加载失败时给出明确提示）
     function checkLibs() {
       const missing = [];
@@ -163,6 +196,7 @@
     document.getElementById('fileInput').addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
+      await ensureLibs();
       if (!checkLibs()) { e.target.value = ''; return; }
       const merge = document.getElementById('mergeChk').checked;
       const status = document.getElementById('status');
@@ -318,9 +352,16 @@
 
     // ================= 初始化 =================
     (async () => {
+      await ensureLibs();
       checkLibs();
-      db = await openDB();
-      renderLibrary();
+      try {
+        db = await openDB();
+        renderLibrary();
+      } catch (e) {
+        // file:// 直接打开、或隐私模式下 IndexedDB 可能不可用
+        document.getElementById('library').innerHTML =
+          '<div class="empty">⚠️ 本地存储不可用（请用 http/https 网址访问，不要直接双击打开文件）</div>';
+      }
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('sw.js').catch(() => {});
       }
