@@ -319,8 +319,11 @@
     }
 
     // ================= 大小限制与进度条 =================
-    const MAX_BYTES = 500 * 1024 * 1024;   // 500 MB
+    const MAX_BYTES = 500 * 1024 * 1024;   // 上传上限 500 MB
     const MAX_LABEL = '500 MB';
+    // 单个 PDF 的提醒阈值（只是提示，不阻止生成）
+    const BIG_PDF_BYTES = 200 * 1024 * 1024;
+    const BIG_PDF_LABEL = '200 MB';
 
     function fmtSize(bytes) {
       if (bytes >= 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
@@ -602,10 +605,16 @@
           .forEach(rec => {
         const div = document.createElement('div');
         div.className = 'item';
+        // 单个 PDF 过大只是提醒，不阻止生成
+        const bigWarn = rec.size > BIG_PDF_BYTES
+          ? '<div class="meta" style="color:#dc2626">⚠️ 超过 ' + BIG_PDF_LABEL +
+            '：多数邮箱附件和在线上传都有此限制，建议拆成多个 PDF</div>'
+          : '';
         div.innerHTML = `
           <div class="name">${rec.name}</div>
           <div class="meta">创建：${rec.createdAt} · ${(rec.size / 1024 / 1024).toFixed(2)} MB
             · ${rec.sent ? '✅ 已发 Kindle' : '⬜ 未发送'}</div>
+          ${bigWarn}
           <div class="ops">
             <button class="btn small" data-act="send">发到 Kindle</button>
             <button class="btn small gray" data-act="rename">重命名</button>
