@@ -39,6 +39,13 @@
     .item .name { font-size: 14px; color: #1f2937; word-break: break-all; font-weight: 600; }
     .item .meta { font-size: 12px; color: #9ca3af; margin: 4px 0 8px; }
     .item .ops { display: flex; gap: 8px; flex-wrap: wrap; }
+    .mask { position: fixed; inset: 0; background: rgba(17,24,39,.5);
+      display: none; align-items: center; justify-content: center; padding: 20px; z-index: 50; }
+    .dialog { background: #fff; border-radius: 16px; padding: 22px; width: 100%; max-width: 360px; }
+    .dialog h3 { font-size: 17px; color: #1f2937; margin-bottom: 10px; }
+    .dialog p { font-size: 13px; color: #6b7280; line-height: 1.7; }
+    .dialog-ops { display: flex; gap: 10px; margin-top: 18px; }
+    .dialog-ops .btn { flex: 1; text-align: center; }
     .empty { color: #9ca3af; font-size: 14px; text-align: center; padding: 16px 0; }
   </style>
 </head>
@@ -617,6 +624,34 @@
       renderLibrary();
     }
 
+    // ================= 通用确认弹窗 =================
+    // 返回 Promise<boolean>：点确定 true，取消 / 点遮罩 false
+    function askConfirm(opts) {
+      return new Promise(res => {
+        const mask = document.createElement('div');
+        mask.className = 'mask';
+        mask.innerHTML =
+          '<div class="dialog">' +
+            '<h3></h3><p></p>' +
+            '<div class="dialog-ops">' +
+              '<button class="btn gray" data-act="no"></button>' +
+              '<button class="btn" data-act="yes"></button>' +
+            '</div>' +
+          '</div>';
+        mask.querySelector('h3').textContent = opts.title || '';
+        mask.querySelector('p').innerHTML = opts.message || '';
+        mask.querySelector('[data-act=no]').textContent = opts.cancelText || '取消';
+        mask.querySelector('[data-act=yes]').textContent = opts.okText || '确定';
+        document.body.appendChild(mask);
+        mask.style.display = 'flex';
+
+        const close = v => { mask.remove(); res(v); };
+        mask.querySelector('[data-act=no]').onclick = () => close(false);
+        mask.querySelector('[data-act=yes]').onclick = () => close(true);
+        mask.onclick = e => { if (e.target === mask) close(false); };
+      });
+    }
+
     // ================= 分享到其它 App（LocalSend 等）=================
     // 用 Web Share API 拉起系统分享面板，再手动选择 LocalSend 接收。
     // 两个硬性条件：① 页面必须是 HTTPS ② 必须由用户点击直接触发（不能放在 await 之后）。
@@ -640,12 +675,24 @@
         }
       }
 
-      // 降级：浏览器没有实现 Web Share API（Via/夸克等套壳浏览器常见）
+      // 降级：浏览器没有实现 Web Share API（Via / 夸克等 WebView 内核浏览器常见）
+      // 先弹窗说明情况，由用户自己决定要不要下载，不擅自落文件
+      const wantDownload = await askConfirm({
+        title: '浏览器不支持系统分享',
+        message: '当前浏览器调不起系统分享面板（Via 等套壳浏览器常见）。<br>' +
+          '改用 <b>Chrome / Edge</b> 打开本页，点「打开 LocalSend」就能直接分享。<br><br>' +
+          '是否改为<b>下载到本机</b>？下载后可在 LocalSend 里手动选择发送。',
+        okText: '直接下载',
+        cancelText: '换浏览器再来'
+      });
+
+      if (!wantDownload) {
+        status.textContent = '已取消，未下载。用 Chrome / Edge 打开本页即可直接分享给 LocalSend。';
+        return;
+      }
+
       download(rec);
-      status.innerHTML =
-        '<span style="color:#dc2626">⚠️ 当前浏览器不支持调起系统分享面板。</span><br>' +
-        '已改为下载到本机，可以在 LocalSend 里用「发送」选择这个文件。<br>' +
-        '想直接弹分享面板，请用 <b>Chrome</b> 或 <b>Edge</b> 打开本页再点一次。';
+      status.innerHTML = '已下载到本机，可在 LocalSend 里用「发送」选择这个文件。';
       await dbPut({ ...rec, sent: true });
       renderLibrary();
     }
