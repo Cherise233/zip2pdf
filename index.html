@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#4f46e5">
+  <meta name="theme-color" content="#f3f4f6">
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/png" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
@@ -45,6 +45,8 @@
     .bar-fill { height: 100%; width: 0%; border-radius: 999px;
       background: linear-gradient(90deg, #818cf8, #4f46e5); transition: width .12s linear; }
     #progressText { margin-top: 6px; font-size: 13px; color: #4b5563; }
+    /* Legado 进度文案：字号与下方详情(14px)一致，加粗更醒目 */
+    #legadoProgressText { margin-top: 6px; font-size: 14px; color: #4b5563; font-weight: 600; }
     .hint { font-size: 12px; color: #9ca3af; margin-top: 10px; }
     h2 { font-size: 17px; color: #1f2937; margin-bottom: 12px; }
     .opt { display: flex; align-items: center; gap: 10px; font-size: 15px; color: #1f2937; }
@@ -167,6 +169,10 @@
         <div class="row" style="margin-bottom:8px">
           <button class="btn small" id="btnBuild" style="flex:1 1 0">🚀 生成 PDF（每话一个）</button>
         </div>
+        <div class="row" style="margin-bottom:8px">
+          <button class="btn small gray" id="btnPause" style="display:none; flex:1 1 0">⏸ 暂停</button>
+          <button class="btn small danger" id="btnCancel" style="display:none; flex:1 1 0">⏹ 取消</button>
+        </div>
         <button class="btn small gray" id="btnReDL" style="display:none; width:100%; margin-bottom:8px">🔄 重新下载坏图</button>
         <div class="bar-wrap" id="legadoBarWrap" style="display:block">
           <div class="bar"><div class="bar-fill" id="legadoBarFill"></div></div>
@@ -177,7 +183,7 @@
     </div>
   </div>
 
-  <div class="card">
+  <div class="card" id="filesCard" style="display:none">
     <h2>📁 文件库（Legado 章节）</h2>
     <div id="files"></div>
     <div class="bulk" id="fileBulk">
@@ -990,9 +996,38 @@
       if(label) document.getElementById('legadoProgressText').textContent = label;
     }
 
+    // ============ 暂停 / 取消 控制 ============
+    const legadoCtrl = { aborted:false, paused:false };
+    function legadoHideCtrl(){
+      $('#btnPause').style.display='none'; $('#btnCancel').style.display='none';
+      $('#btnPause').textContent='⏸ 暂停';
+    }
+    // 暂停时在此等待；取消时抛 __ABORT__ 让上层捕获退出
+    function legadoWaitIfPaused(){
+      return new Promise((resolve, reject)=>{
+        const tick = ()=>{
+          if(legadoCtrl.aborted){ reject(new Error('__ABORT__')); return; }
+          if(!legadoCtrl.paused){ resolve(); return; }
+          setTimeout(tick, 150);
+        };
+        tick();
+      });
+    }
+
+    const LEGADO_TIMEOUT = 20000; // 单请求超时：避免某话卡住时一直停在「准备中」
     async function legadoApi(path){
       const base = $('#legadoBase').value.trim().replace(/\/+$/,'');
-      const res = await fetch(base + path, {mode:'cors', cache:'no-store'});
+      const ctrl = new AbortController();
+      const timer = setTimeout(()=>ctrl.abort(), LEGADO_TIMEOUT);
+      let res;
+      try{
+        res = await fetch(base + path, {mode:'cors', cache:'no-store', signal: ctrl.signal});
+      }catch(e){
+        clearTimeout(timer);
+        const msg = (e.name==='AbortError') ? ('请求超时(>'+ (LEGADO_TIMEOUT/1000) +'s)') : e.message;
+        throw new Error(msg + ' @ ' + path);
+      }
+      clearTimeout(timer);
       if(!res.ok) throw new Error('HTTP '+res.status+' @ '+path);
       return res;
     }
@@ -1139,6 +1174,7 @@
 
     async function runFetch(items, bookUrl, onOne, limit){
       await mapLimit(items, limit || CONCURRENCY, async (it)=>{
+        await legadoWaitIfPaused();
         await fetchItem(bookUrl, it);
         onOne(it);
       });
@@ -1174,14 +1210,18 @@
       // 并发线数从输入框读取（1~32），默认 8
       const CONC = Math.max(1, Math.min(32, parseInt($('#concInput') && $('#concInput').value, 10) || CONCURRENCY));
       $('#btnBuild').disabled = true; $('#btnReDL').style.display='none';
+      // 暂停 / 取消 控制：每次生成重置
+      legadoCtrl.aborted=false; legadoCtrl.paused=false;
+      $('#btnPause').style.display=''; $('#btnPause').textContent='⏸ 暂停';
+      $('#btnCancel').style.display='';
       IMAGES = [];
       // 进度条恢复开始状态
-      setLegadoProg(0, '');
-      document.getElementById('legadoProgressText').textContent = '准备中…';
+      setLegadoProg(0, '准备中…');
       try{
         setLegadoStatus('收集章节图片列表…');
-        let total=0;
+        let total=0, readCnt=0;
         for(const ci of idxs){
+          await legadoWaitIfPaused();
           const ch = CHAPTERS[ci];
           setLegadoStatus('读取第 '+(ci+1)+' 话：'+(ch.name||ch.title||'')+' …');
           let content;
@@ -1195,21 +1235,23 @@
             IMAGES.push({ ci, chName:(ch.name||ch.title||('第'+ci)), url:u.url, src:u.src,
                           data:null, broken:false, err:'' });
           }
-          total += urls.length;
+          total += urls.length; readCnt++;
+          setLegadoProg(0, '准备中：已读 '+readCnt+'/'+idxs.length+' 话');
         }
-        if(!total){ setLegadoStatus('没有可生成的图片。'); $('#btnBuild').disabled=false; return; }
+        if(!total){ setLegadoStatus('没有可生成的图片。'); $('#btnBuild').disabled=false; legadoHideCtrl(); return; }
 
         setLegadoStatus('开始取图，共 '+total+' 张（并发 '+CONC+'）…');
         let done=0, broken=0;
         await runFetch(IMAGES, bookUrl, (it)=>{
           done++; if(it.broken) broken++;
-          setLegadoProg(done/total);
+          setLegadoProg(done/total, '取图 '+done+'/'+total);
           if(it.broken) setLegadoStatus('取图中 '+done+'/'+total+' … 已发现坏图 '+broken+' 张');
         }, CONC);
 
         // 逐话生成 PDF 并存入文件库
-        let okChapters=0;
+        let okChapters=0, builtCnt=0;
         for(const ci of idxs){
+          await legadoWaitIfPaused();
           const pages = IMAGES.filter(it=>it.ci===ci && it.data).map(it=>it.data);
           const chBroken = IMAGES.some(it=>it.ci===ci && it.broken);
           if(!pages.length){ continue; }
@@ -1220,14 +1262,15 @@
             createdAt: new Date().toLocaleString('zh-CN'), blob, kind: 'legado',
             bookName, chapter: ci, broken: chBroken, seq: ++fileSeq
           });
-          okChapters++;
+          okChapters++; builtCnt++;
+          setLegadoProg(done/total, '已生成 '+builtCnt+'/'+idxs.length+' 话 PDF');
         }
         renderFiles();
 
         if(!okChapters){
           const lastErr = (IMAGES.find(i=>i.err && i.err!=='坏图/占位图')||{}).err || '占位图';
           setLegadoStatus('全部图片取图失败/坏图。\n最后错误：'+lastErr+'\n把这段报错发我即可定位。');
-          $('#btnBuild').disabled=false; return;
+          $('#btnBuild').disabled=false; legadoHideCtrl(); return;
         }
         setLegadoStatus('✅ 完成！已存入文件库 '+okChapters+' 个 PDF（每话一个）'
           + (broken ? '，坏图 '+broken+' 张（点下面按钮可只重下坏图）' : '')
@@ -1236,8 +1279,14 @@
           $('#btnReDL').style.display='';
           $('#btnReDL').textContent='🔄 重新下载坏图 ('+broken+')';
         }
-      }catch(e){ setLegadoStatus('生成出错：'+e.message); }
-      finally{ $('#btnBuild').disabled = false; }
+      }catch(e){
+        if(e && e.message==='__ABORT__'){
+          setLegadoStatus('⏹ 已取消。已生成完成的 PDF 保留在文件库，未完成的不再继续。');
+        }else{
+          setLegadoStatus('生成出错：'+e.message);
+        }
+      }
+      finally{ $('#btnBuild').disabled = false; legadoHideCtrl(); }
     }
 
     // 只重下坏图：再请求一次（legado 有缓存，常在第二次成功），重建受影响的话并覆盖文件库记录
@@ -1245,6 +1294,7 @@
       const bad = IMAGES.filter(it=>it.broken);
       if(!bad.length){ setLegadoStatus('当前没有坏图。'); return; }
       $('#btnReDL').disabled = true; $('#btnBuild').disabled = true;
+      legadoCtrl.aborted=false; legadoCtrl.paused=false;
       const b = BOOKS[+$('#legadoBookSel').value];
       const bookUrl = b.bookUrl || b.url;
       const bookName = (b.name || b.bookName || 'legado') + '';
@@ -1281,7 +1331,10 @@
     function bindLegado(){
       $('#btnLegadoToggle').addEventListener('click', ()=>{
         const p = $('#legadoPanel');
-        p.style.display = p.style.display === 'none' ? 'block' : 'none';
+        const show = p.style.display === 'none';
+        // 文件库与 Legado 面板一起显示/隐藏
+        p.style.display = show ? 'block' : 'none';
+        $('#filesCard').style.display = show ? 'block' : 'none';
       });
       $('#btnShelf').addEventListener('click', loadShelf);
       $('#btnChapters').addEventListener('click', loadChapters);
@@ -1303,6 +1356,16 @@
         setLegadoStatus('已选第 '+Math.min(a,b)+'~'+Math.max(a,b)+' 话。');
       });
       $('#btnBuild').addEventListener('click', legadoBuild);
+      $('#btnPause').addEventListener('click', ()=>{
+        legadoCtrl.paused = !legadoCtrl.paused;
+        $('#btnPause').textContent = legadoCtrl.paused ? '▶ 继续' : '⏸ 暂停';
+        if(legadoCtrl.paused) setLegadoStatus('⏸ 已暂停，点「继续」恢复。');
+      });
+      $('#btnCancel').addEventListener('click', ()=>{
+        legadoCtrl.aborted = true; legadoCtrl.paused = false;
+        $('#btnPause').textContent='⏸ 暂停';
+        setLegadoStatus('⏹ 正在取消…');
+      });
       $('#btnReDL').addEventListener('click', legadoReDownload);
     }
 
