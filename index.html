@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#f3f4f6">
+  <meta name="theme-color" content="#4f46e5">
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/png" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
@@ -170,8 +170,8 @@
           <button class="btn small" id="btnBuild" style="flex:1 1 0">🚀 生成 PDF（每话一个）</button>
         </div>
         <div class="row" style="margin-bottom:8px">
-          <button class="btn small gray" id="btnPause" style="display:none; flex:1 1 0">⏸ 暂停</button>
-          <button class="btn small danger" id="btnCancel" style="display:none; flex:1 1 0">⏹ 取消</button>
+          <button class="btn small gray" id="btnPause" style="display:none; flex:1 1 0">暂停</button>
+          <button class="btn small danger" id="btnCancel" style="display:none; flex:1 1 0">取消</button>
         </div>
         <button class="btn small gray" id="btnReDL" style="display:none; width:100%; margin-bottom:8px">🔄 重新下载坏图</button>
         <div class="bar-wrap" id="legadoBarWrap" style="display:block">
@@ -1000,7 +1000,8 @@
     const legadoCtrl = { aborted:false, paused:false };
     function legadoHideCtrl(){
       $('#btnPause').style.display='none'; $('#btnCancel').style.display='none';
-      $('#btnPause').textContent='⏸ 暂停';
+      $('#btnPause').textContent='暂停';
+      $('#btnPause').classList.add('gray');
     }
     // 暂停时在此等待；取消时抛 __ABORT__ 让上层捕获退出
     function legadoWaitIfPaused(){
@@ -1212,7 +1213,8 @@
       $('#btnBuild').disabled = true; $('#btnReDL').style.display='none';
       // 暂停 / 取消 控制：每次生成重置
       legadoCtrl.aborted=false; legadoCtrl.paused=false;
-      $('#btnPause').style.display=''; $('#btnPause').textContent='⏸ 暂停';
+      $('#btnPause').style.display=''; $('#btnPause').textContent='暂停';
+      $('#btnPause').classList.add('gray');
       $('#btnCancel').style.display='';
       IMAGES = [];
       // 进度条恢复开始状态
@@ -1281,7 +1283,11 @@
         }
       }catch(e){
         if(e && e.message==='__ABORT__'){
-          setLegadoStatus('⏹ 已取消。已生成完成的 PDF 保留在文件库，未完成的不再继续。');
+          // 取消：清掉已取的图片数据（释放内存），进度条重置隐藏
+          IMAGES = [];
+          document.getElementById('legadoBarWrap').style.display='none';
+          document.getElementById('legadoProgressText').textContent='';
+          setLegadoStatus('已取消。已生成完成的 PDF 保留在文件库，未完成的不再继续。');
         }else{
           setLegadoStatus('生成出错：'+e.message);
         }
@@ -1358,13 +1364,15 @@
       $('#btnBuild').addEventListener('click', legadoBuild);
       $('#btnPause').addEventListener('click', ()=>{
         legadoCtrl.paused = !legadoCtrl.paused;
-        $('#btnPause').textContent = legadoCtrl.paused ? '▶ 继续' : '⏸ 暂停';
-        if(legadoCtrl.paused) setLegadoStatus('⏸ 已暂停，点「继续」恢复。');
+        // 暂停态显示「继续」并用靛蓝主色，恢复后回灰色「暂停」
+        $('#btnPause').textContent = legadoCtrl.paused ? '继续' : '暂停';
+        $('#btnPause').classList.toggle('gray', !legadoCtrl.paused);
+        if(legadoCtrl.paused) setLegadoStatus('已暂停，点「继续」恢复。');
       });
       $('#btnCancel').addEventListener('click', ()=>{
         legadoCtrl.aborted = true; legadoCtrl.paused = false;
-        $('#btnPause').textContent='⏸ 暂停';
-        setLegadoStatus('⏹ 正在取消…');
+        $('#btnPause').textContent='暂停';
+        setLegadoStatus('正在取消…');
       });
       $('#btnReDL').addEventListener('click', legadoReDownload);
     }
