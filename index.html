@@ -659,46 +659,46 @@
     async function shareFile(rec) {
       const status = document.getElementById('status');
       const file = new File([rec.blob], rec.name, { type: 'application/pdf' });
-      let lastErr = null;
+      let shareErr = null;
 
       // canShare() 只接受 files 属性（web.dev 明确说明），且只在它明确返回 false 时才放弃。
       // canShare 缺失或误报 true 的浏览器，仍要实际试一次才知道。
       const blocked = !!(navigator.canShare && navigator.canShare({ files: [file] }) === false);
 
+      // ⚠️ 只尝试一次，绝不重试：
+      // navigator.share() 会消耗掉「用户手势(transient activation)」，
+      // 第二次调用必然抛 NotAllowedError: Must be handling a user gesture。
       if (navigator.share && !blocked) {
-        // 各家实现细节有差异（Edge 与 Chrome 对参数组合的容忍度不同），
-        // 依次尝试多种参数组合，任一成功即可。
-        const attempts = [
-          { files: [file], title: rec.name },
-          { files: [file] },
-          { files: [file], title: rec.name, text: rec.name }
-        ];
-        for (const payload of attempts) {
-          try {
-            await navigator.share(payload);
-            await dbPut({ ...rec, sent: true });
-            renderLibrary();
-            return;
-          } catch (e) {
-            if (e.name === 'AbortError') return;   // 用户在面板里取消，不再重试
-            lastErr = e;                            // 换下一种参数组合再试
-          }
+        try {
+          await navigator.share({ files: [file], title: rec.name });
+          await dbPut({ ...rec, sent: true });
+          renderLibrary();
+          return;
+        } catch (e) {
+          if (e.name === 'AbortError') return;   // 用户在面板里取消
+          shareErr = e;
         }
       }
 
-      // 走到这里说明分享失败（Via 类无 API，或 Edge 等实现不兼容）
       // 带上真实错误原因，方便定位
-      const reason = lastErr
+      const reason = shareErr
         ? '<br><span style="font-size:12px;color:#9ca3af">失败原因：' +
-          escapeHtml(lastErr.name || '未知') +
-          (lastErr.message ? ' · ' + escapeHtml(lastErr.message) : '') + '</span>'
+          escapeHtml(shareErr.name || '未知') +
+          (shareErr.message ? ' · ' + escapeHtml(shareErr.message) : '') + '</span>'
+        : '';
+
+      // NotAllowedError 常见于浏览器认定「这次点击没带有效手势」，单独给建议
+      const gestureTip = shareErr && shareErr.name === 'NotAllowedError'
+        ? '<br><br>这个错误表示浏览器认为点击时没有有效的用户手势。' +
+          '可以试试：<b>重新点一次按钮，并在面板弹出后立刻选择 LocalSend</b>；' +
+          '若仍失败，该浏览器（如 Edge）多半实现不完整。'
         : '';
 
       // 先弹窗说明情况，由用户自己决定要不要下载，不擅自落文件
       const wantDownload = await askConfirm({
         title: '无法调起系统分享面板',
         message: '当前浏览器没能分享这个文件（Via 等套壳浏览器无此能力，' +
-          'Edge 等也可能实现不完整）。' + reason + '<br><br>' +
+          'Edge 等也可能实现不完整）。' + reason + gestureTip + '<br><br>' +
           '改用 <b>Chrome</b> 打开本页通常可以正常分享。<br><br>' +
           '是否改为<b>下载到本机</b>？下载后可在 LocalSend 里手动选择发送。',
         okText: '直接下载',
