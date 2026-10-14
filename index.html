@@ -32,7 +32,16 @@
       border: 1px solid #d1d5db; border-radius: 8px; background: #fff; color: #1f2937;
     }
     #legadoPanel .row > input { flex: 1 1 0; min-width: 0; }
-    #legadoPanel label { display: block; font-size: 14px; color: #374151; margin-bottom: 6px; }
+    #legadoPanel label { display: block; font-size:14px; color:#374151; margin-bottom:6px; }
+    /* 通用下拉样式（选书 / 文件库排序 / 章节顺序 共用，外观一致） */
+    .sel-select { width:100%; max-width:100%; padding:8px 12px; font-size:13px;
+      border:1px solid #d1d5db; border-radius:8px; background:#fff; color:#1f2937; height:auto; }
+    /* 文件库拖拽排序 */
+    #files .item { cursor:grab; }
+    #files .item.dragging { opacity:.4; }
+    #files .item.dragover { box-shadow: inset 0 0 0 2px #4f46e5; }
+    .reorder-hint { font-size:12px; color:#9ca3af; margin:6px 0 2px; }
+    #chLoadStatus, #fileMergeStatus { margin-top:8px; }
     .btn:disabled { background: #9ca3af; cursor: not-allowed; }
     .btn.small { padding: 7px 12px; font-size: 13px; border-radius: 8px; }
     /* Legado 面板按钮高度与「文件库·合并」按钮(.bulk-ops .btn.small 9px 纵向)保持一致 */
@@ -141,14 +150,25 @@
 
       <div id="legadoBookCard" style="display:none; margin-top:16px; padding-top:14px; border-top:1px solid #e5e7eb">
         <label>选择书籍</label>
-        <select id="legadoBookSel"></select>
-        <div class="row" style="margin-top:10px">
+        <div class="row" style="margin-bottom:8px">
+          <select id="legadoBookSel" class="sel-select" style="flex:1 1 auto"></select>
+          <input type="text" id="bookSearch" placeholder="🔍 搜索书名" class="sel-select" style="flex:0 1 130px">
+        </div>
+        <div class="row" style="margin-top:4px">
           <button class="btn small gray" id="btnChapters">读取章节</button>
         </div>
+        <div id="chLoadStatus" class="legado-hint" style="margin-top:8px; display:none"></div>
       </div>
 
       <div id="legadoChCard" style="display:none; margin-top:16px; padding-top:14px; border-top:1px solid #e5e7eb">
         <label>选择要转换的章节</label>
+        <div class="row" style="margin-bottom:8px">
+          <span style="font-size:13px;color:#374151">显示顺序</span>
+          <select id="chapterOrder" class="sel-select" style="flex:1 1 auto">
+            <option value="asc">正序（1→N）</option>
+            <option value="desc">倒序（N→1）</option>
+          </select>
+        </div>
         <div class="row" style="margin-bottom:8px">
           <button class="btn small gray" id="btnAll">全选</button>
           <button class="btn small gray" id="btnNone">全不选</button>
@@ -185,6 +205,16 @@
 
   <div class="card" id="filesCard" style="display:none">
     <h2>📁 文件库（Legado 章节）</h2>
+    <div class="row" style="margin-bottom:6px">
+      <select id="fileSort" class="sel-select" style="flex:1 1 auto">
+        <option value="manual" selected>手动（拖拽排序）</option>
+        <option value="nameAZ">名称 A → Z</option>
+        <option value="nameZA">名称 Z → A</option>
+        <option value="timeNew">时间 新 → 旧</option>
+        <option value="timeOld">时间 旧 → 新</option>
+      </select>
+    </div>
+    <div class="reorder-hint">长按拖动可调整顺序，合并按此顺序从上到下</div>
     <div id="files"></div>
     <div class="bulk" id="fileBulk">
       <div class="bulk-top">
@@ -197,6 +227,7 @@
         <button class="btn small gray" id="fileRename">重命名</button>
         <button class="btn small danger" id="fileDelete">删除</button>
       </div>
+      <div id="fileMergeStatus" class="legado-hint" style="margin-top:8px; display:none"></div>
     </div>
   </div>
 
@@ -567,6 +598,7 @@
       const files = Array.from(e.target.files || []);
       e.target.value = '';
       if (!files.length) return;
+      const totalBytes = files.reduce((s, f) => s + f.size, 0);
       await ensureLibs();
       const missing = checkLibs();
       if (missing.length) { reportLibMissing(missing); return; }
@@ -734,12 +766,14 @@
         return;
       }
       el.innerHTML = '';
-      // 按 seq 升序（即生成顺序 = 话数顺序），保持与漫画顺序一致
-      list.sort((a, b) => (a.seq || 0) - (b.seq || 0))
+      // 按 order 升序（手动拖拽 / 排序下拉设置的顺序）
+      list.sort((a, b) => ((a.order!=null?a.order:0) - (b.order!=null?b.order:0)))
           .forEach(rec => {
         const div = document.createElement('div');
         const on = selFiles.has(rec.id);
         div.className = 'item' + (on ? ' sel' : '');
+        div.draggable = true;
+        div.dataset.id = rec.id;
         const brokenBadge = rec.broken
           ? '<span style="color:#dc2626"> ⚠️ 含坏图</span>' : '';
         div.innerHTML =
@@ -752,9 +786,51 @@
           selFiles.has(rec.id) ? selFiles.delete(rec.id) : selFiles.add(rec.id);
           renderFiles();
         };
+        div.addEventListener('dragstart', (e) => {
+          dragFileId = rec.id; div.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        div.addEventListener('dragend', () => {
+          div.classList.remove('dragging');
+          document.querySelectorAll('#files .item').forEach(x => x.classList.remove('dragover'));
+        });
+        div.addEventListener('dragover', (e) => { e.preventDefault(); div.classList.add('dragover'); });
+        div.addEventListener('dragleave', () => div.classList.remove('dragover'));
+        div.addEventListener('drop', (e) => {
+          e.preventDefault(); div.classList.remove('dragover'); onDropFile(rec.id);
+        });
         el.appendChild(div);
       });
       updateBulkBar('file', list.length);
+    }
+
+    // 拖拽落位：把 dragFileId 移到 targetId 前/后并重排 order 持久化
+    async function onDropFile(targetId) {
+      if (!dragFileId || dragFileId === targetId) return;
+      const list = await dbAllFiles();
+      const arr = list.slice().sort((a, b) => (a.order!=null?a.order:0) - (b.order!=null?b.order:0));
+      const from = arr.findIndex(r => r.id === dragFileId);
+      const to = arr.findIndex(r => r.id === targetId);
+      if (from < 0 || to < 0) return;
+      const [moved] = arr.splice(from, 1);
+      // 统一落在目标之后：from<to 时移除后目标左移 1，插 to；from>to 时目标位置不变，插 to+1
+      arr.splice(from < to ? to : to + 1, 0, moved);
+      for (let i = 0; i < arr.length; i++) { arr[i].order = i + 1; await dbPutFile(arr[i]); }
+      dragFileId = null;
+      renderFiles();
+    }
+
+    // 文件库排序下拉：按所选方式重排 order 并持久化
+    async function applyFileSort(mode) {
+      if (mode === 'manual') return;
+      const list = await dbAllFiles();
+      let arr = list.slice();
+      if (mode === 'nameAZ') arr.sort((a, b) => (a.name||'').localeCompare(b.name||'', 'zh'));
+      else if (mode === 'nameZA') arr.sort((a, b) => (b.name||'').localeCompare(a.name||'', 'zh'));
+      else if (mode === 'timeNew') arr.sort((a, b) => (b.createdAt||'').localeCompare(a.createdAt||'', 'zh'));
+      else if (mode === 'timeOld') arr.sort((a, b) => (a.createdAt||'').localeCompare(b.createdAt||'', 'zh'));
+      for (let i = 0; i < arr.length; i++) { arr[i].order = i + 1; await dbPutFile(arr[i]); }
+      renderFiles();
     }
 
     async function rename(rec, store) {
@@ -793,10 +869,18 @@
     }
 
     // ================= 分享到其它 App（LocalSend 等）=================
+    // Chromium 的 navigator.share 对大 blob 支持不稳：单文件 >64MB 或合计 >128MB
+    // 时会直接抛 NotAllowedError，多选时尤其明显 → 超过阈值直接走下载降级
+    // 分享大小阈值：放宽到 500MB。超限不再直接跳过，仍先尝试 navigator.share，
+    // 失败（Chromium 对大 blob 可能抛 NotAllowedError）再走下载降级
+    const SHARE_MAX_ONE = 500 * 1024 * 1024;
+    const SHARE_MAX_TOTAL = 500 * 1024 * 1024;
     async function shareFiles(recs) {
       if (!recs || !recs.length) return;
       const status = document.getElementById('status');
       const files = recs.map(r => new File([r.blob], r.name, { type: 'application/pdf' }));
+      const totalBytes = files.reduce((s, f) => s + f.size, 0);
+      const tooBig = files.some(f => f.size > SHARE_MAX_ONE) || totalBytes > SHARE_MAX_TOTAL;
       let shareErr = null;
       const blocked = !!(navigator.canShare && navigator.canShare({ files }) === false);
       if (navigator.share && !blocked) {
@@ -810,16 +894,22 @@
           shareErr = e;
         }
       }
+      // 降级下载；文件较大时把合计大小写进原因，方便判断是否为大小问题
+      const sizeNote = tooBig
+        ? '所选文件合计 ' + fmtSize(totalBytes) + '，超过 ' + fmtSize(SHARE_MAX_TOTAL) + ' 上限'
+        : (shareErr && shareErr.name === 'NotAllowedError'
+            ? '系统分享面板拒绝了本次请求（NotAllowedError，合计 ' + fmtSize(totalBytes) + '，可能是文件过大）'
+            : (shareErr ? escapeHtml(shareErr.message || shareErr.name || '未知') : ''));
       const wantDownload = await askConfirm({
         title: '无法调起系统分享面板',
-        message: '当前浏览器不支持直接分享文件。' +
-          (shareErr ? '<br>原因：' + escapeHtml(shareErr.name || '未知') : '') +
-          '<br><br>是否改为<b>下载到本机</b>？',
+        message: '当前无法直接分享这些文件。' +
+          (sizeNote ? '<br>原因：' + sizeNote : '') +
+          '<br><br>是否改为<b>下载到本机</b>？下载后可在 LocalSend 里手动选择发送。',
         okText: '直接下载', cancelText: '取消'
       });
       if (!wantDownload) { status.textContent = '已取消，未下载。'; return; }
       for (const r of recs) { download(r); await new Promise(res => setTimeout(res, 400)); }
-      status.textContent = '已下载 ' + recs.length + ' 个文件到本机。';
+      status.textContent = '已下载 ' + recs.length + ' 个文件到本机，可在 LocalSend 中手动发送。';
       for (const r of recs) await dbPut({ ...r, sent: true });
       renderLibrary();
     }
@@ -842,8 +932,9 @@
     }
     async function selectedFiles() {
       const list = await dbAllFiles();
-      // 保持选择顺序按 seq 排序，合并时顺序与漫画一致
-      return list.filter(r => selFiles.has(r.id)).sort((a, b) => (a.seq || 0) - (b.seq || 0));
+      // 保持选择顺序按 order 排序，合并顺序与文件库显示一致
+      return list.filter(r => selFiles.has(r.id))
+                 .sort((a, b) => ((a.order!=null?a.order:0) - (b.order!=null?b.order:0)));
     }
 
     function bindBulk() {
@@ -904,7 +995,9 @@
       };
       document.getElementById('fileMerge').onclick = async () => {
         const recs = await selectedFiles();
-        if (!recs.length) { setLegadoStatus('请先选择至少 1 个文件。'); return; }
+        const st = document.getElementById('fileMergeStatus');
+        st.style.display = '';
+        if (!recs.length) { st.textContent = '请先选择至少 1 个文件。'; return; }
         // 仅选 1 个：直接原样存入「我的 PDF 库」，不改名、不重处理
         if (recs.length === 1) {
           const r = recs[0];
@@ -913,8 +1006,7 @@
             createdAt: new Date().toLocaleString('zh-CN'), sent: false, blob: r.blob
           });
           renderLibrary();
-          document.getElementById('status').textContent =
-            '✅ 已将「' + r.name + '」存入「我的 PDF 库」（未改名，可直接打开 LocalSend 分享）';
+          st.textContent = '✅ 已将「' + r.name + '」存入「我的 PDF 库」（未改名，可直接打开 LocalSend 分享）';
           return;
         }
         await mergeFiles(recs);
@@ -943,21 +1035,35 @@
 
     // ================= 合并多个 PDF（pdf-lib）=================
     // 合并结果存入「我的 PDF 库」，可直接 LocalSend 分享；命名与下载时一致（漫画名_范围话.pdf）
+    // 合并前插入「目录」页，顺序与文件库（recs）一致：先 TOC，再按 recs 顺序拼页
     async function mergeFiles(recs) {
       await ensureLibs();
+      const st = document.getElementById('fileMergeStatus');
+      st.style.display = '';
       if (typeof PDFLib === 'undefined') {
-        setLegadoStatus('⚠️ 合并所需 pdf-lib 未加载，请确认 vendor/pdf-lib.min.js 已上传。');
+        st.textContent = '⚠️ 合并所需 pdf-lib 未加载，请确认 vendor/pdf-lib.min.js 已上传。';
         return;
       }
-      setLegadoStatus('合并中：' + recs.length + ' 个文件…');
+      st.textContent = '合并中：' + recs.length + ' 个文件…';
       try {
         const merged = await PDFLib.PDFDocument.create();
+        const startIdx = [];   // 每个 rec 在合并后（不含 TOC）的起始页（0 基）
+        let acc = 0;
         for (const r of recs) {
           const bytes = await r.blob.arrayBuffer();
           const src = await PDFLib.PDFDocument.load(bytes);
           const pages = await merged.copyPages(src, src.getPageIndices());
+          startIdx.push(acc);
+          acc += pages.length;
           pages.forEach(p => merged.addPage(p));
         }
+        // 目录页：用 canvas 渲染中文（避免 pdf-lib 标准字体不支持中文）
+        const tocEntries = recs.map((r, k) => ({ label: tocLabel(r), page: startIdx[k] + 2 }));
+        const toc = await makeTocPage(tocEntries);
+        const tocImg = await merged.embedPng(toc.bytes);
+        const tocPage = merged.insertPage(0, [toc.W, toc.H]);
+        tocPage.drawImage(tocImg, { x: 0, y: 0, width: toc.W, height: toc.H });
+
         const out = await merged.save();
         const blob = new Blob([out], { type: 'application/pdf' });
         // 命名：同一本书且都有话号 → 漫画名_范围话.pdf（与下载命名一致）；否则兜底
@@ -972,17 +1078,48 @@
           createdAt: new Date().toLocaleString('zh-CN'), sent: false, blob
         });
         renderLibrary();
-        document.getElementById('status').textContent =
+        st.textContent =
           '✅ 已合并为 1 个 PDF：' + name + '（已存入「我的 PDF 库」，可打开 LocalSend 分享）';
       } catch (e) {
-        setLegadoStatus('合并失败：' + e.message);
+        st.textContent = '合并失败：' + e.message;
       }
+    }
+
+    // 目录条目标签：有话号 → 第X话；否则用文件名（去 .pdf）
+    function tocLabel(r) {
+      if (typeof r.chapter === 'number' && r.chapter >= 0) return '第' + (r.chapter + 1) + '话';
+      return (r.name || '未命名').replace(/\.pdf$/i, '');
+    }
+    // 用 canvas 画一张「目录」页（支持中文），转 PNG 供 pdf-lib 嵌入
+    async function makeTocPage(entries) {
+      const W = 595.28, H = 841.89;           // A4 尺寸（pt）
+      const c = document.createElement('canvas');
+      c.width = Math.round(W * 2); c.height = Math.round(H * 2);
+      const g = c.getContext('2d'); g.scale(2, 2);
+      g.fillStyle = '#ffffff'; g.fillRect(0, 0, W, H);
+      g.fillStyle = '#1f2937'; g.textAlign = 'center'; g.font = 'bold 24px sans-serif';
+      g.fillText('目录', W / 2, 56);
+      g.textAlign = 'left'; g.font = '15px sans-serif'; g.fillStyle = '#1f2937';
+      let y = 100;
+      for (const e of entries) {
+        g.textAlign = 'left';  g.fillText(e.label, 48, y);
+        g.textAlign = 'right'; g.fillText(String(e.page), W - 48, y);
+        g.strokeStyle = '#d1d5db'; g.setLineDash([2, 3]); g.lineWidth = 1;
+        g.beginPath(); g.moveTo(48, y + 6); g.lineTo(W - 48, y + 6); g.stroke(); g.setLineDash([]);
+        y += 30;
+        if (y > H - 60) break;   // 条目过多时截断（极少出现）
+      }
+      const dataUrl = c.toDataURL('image/png');
+      const buf = await (await fetch(dataUrl)).arrayBuffer();
+      return { bytes: new Uint8Array(buf), W, H };
     }
 
     // ============================================================
     // ================= Legado 直连转 PDF =================
     // ============================================================
     let BOOKS = [], CHAPTERS = [], SELECTED = new Set(), IMAGES = [];
+    let chapterDisplayOrder = 'asc';   // 章节列表显示顺序：asc 正序 / desc 倒序
+    let dragFileId = null;             // 文件库拖拽排序：当前拖动的文件 id
     const CONCURRENCY = 8;
     const RETRIES = 2;
     const PLACEHOLDER_BYTES = 50000;
@@ -997,11 +1134,12 @@
     }
 
     // ============ 暂停 / 取消 控制 ============
-    const legadoCtrl = { aborted:false, paused:false };
+    const legadoCtrl = { aborted:false, paused:false, lastStatus:null };
     function legadoHideCtrl(){
       $('#btnPause').style.display='none'; $('#btnCancel').style.display='none';
       $('#btnPause').textContent='暂停';
       $('#btnPause').classList.add('gray');
+      legadoCtrl.lastStatus = null;
     }
     // 暂停时在此等待；取消时抛 __ABORT__ 让上层捕获退出
     function legadoWaitIfPaused(){
@@ -1033,6 +1171,24 @@
       return res;
     }
 
+    // 选书：根据关键字过滤（书名/作者），保持当前选中项
+    function renderBookOptions(filter){
+      const sel = $('#legadoBookSel');
+      const prev = sel.value;
+      sel.innerHTML = '';
+      const f = (filter || '').toLowerCase();
+      BOOKS.forEach((b, i) => {
+        const name = (b.name || b.bookName || ('书籍' + i)) + '';
+        const author = (b.author || '') + '';
+        if (f && !(name.toLowerCase().includes(f) || author.toLowerCase().includes(f))) return;
+        const o = document.createElement('option');
+        o.value = i;
+        o.textContent = name + (author ? (' · ' + author) : '');
+        sel.appendChild(o);
+      });
+      if (sel.querySelector('option[value="' + prev + '"]')) sel.value = prev;
+    }
+
     async function loadShelf(){
       try{
         setLegadoStatus('正在读取书架…');
@@ -1040,13 +1196,7 @@
         const data = await res.json();
         BOOKS = Array.isArray(data) ? data : (data.data || []);
         if(!BOOKS.length){ setLegadoStatus('书架为空'); return; }
-        const sel = $('#legadoBookSel'); sel.innerHTML = '';
-        BOOKS.forEach((b,i)=>{
-          const o = document.createElement('option');
-          o.value = i;
-          o.textContent = (b.name || b.bookName || ('书籍'+i)) + '  ' + (b.author?('· '+b.author):'');
-          sel.appendChild(o);
-        });
+        renderBookOptions('');
         $('#legadoBookCard').style.display='';
         setLegadoStatus('共 '+BOOKS.length+' 本，请选择。');
       }catch(e){
@@ -1058,24 +1208,40 @@
       const b = BOOKS[+$('#legadoBookSel').value];
       if(!b) return;
       const bookUrl = b.bookUrl || b.url;
+      // 重新读取：重置进度条、提示、坏图重下按钮、生成按钮
+      $('#legadoBarWrap').style.display='none';
+      $('#legadoProgressText').textContent='';
+      $('#btnReDL').style.display='none';
+      $('#btnBuild').disabled=false; legadoHideCtrl();
       try{
-        setLegadoStatus('读取章节中…');
+        const cs = $('#chLoadStatus'); cs.style.display=''; cs.textContent='读取章节中…';
         const res = await legadoApi('/getChapterList?url='+encodeURIComponent(bookUrl));
         const data = await res.json();
         CHAPTERS = Array.isArray(data) ? data : (data.chapters || data.data || []);
-        const list = $('#legadoChList'); list.innerHTML=''; SELECTED = new Set();
-        CHAPTERS.forEach((c,i)=>{
-          const name = c.name || c.title || ('第'+i+'章');
-          const div = document.createElement('div'); div.className='ch';
-          const cb = document.createElement('input'); cb.type='checkbox'; cb.dataset.i=i;
-          cb.addEventListener('change', ()=>{ cb.checked?SELECTED.add(i):SELECTED.delete(i); });
-          const sp = document.createElement('span'); sp.textContent = (i+1)+'. '+name;
-          div.appendChild(cb); div.appendChild(sp); list.appendChild(div);
-        });
+        renderChapterList();
         $('#legadoChCard').style.display='';
         $('#legadoRunCard').style.display='';
-        setLegadoStatus('共 '+CHAPTERS.length+' 话。勾选要转换的（可全选/范围）。');
-      }catch(e){ setLegadoStatus('读取章节失败：'+e.message); }
+        cs.textContent='共 '+CHAPTERS.length+' 话。勾选要转换的（可全选/范围）。';
+      }catch(e){
+        const cs = $('#chLoadStatus'); cs.style.display=''; cs.textContent='读取章节失败：'+e.message;
+      }
+    }
+
+    // 按当前显示顺序渲染章节勾选列表（保留 SELECTED 勾选状态）
+    function renderChapterList(){
+      const list = $('#legadoChList'); list.innerHTML='';
+      const idxs = [...CHAPTERS.keys()];
+      if (chapterDisplayOrder === 'desc') idxs.reverse();
+      for (const i of idxs){
+        const c = CHAPTERS[i];
+        const name = c.name || c.title || ('第'+i+'章');
+        const div = document.createElement('div'); div.className='ch';
+        const cb = document.createElement('input'); cb.type='checkbox'; cb.dataset.i=i;
+        if (SELECTED.has(i)) cb.checked = true;
+        cb.addEventListener('change', ()=>{ cb.checked?SELECTED.add(i):SELECTED.delete(i); });
+        const sp = document.createElement('span'); sp.textContent = (i+1)+'. '+name;
+        div.appendChild(cb); div.appendChild(sp); list.appendChild(div);
+      }
     }
 
     // 从章节正文提取图片（保留完整 src：URL + ,{"headers":{...}} JSON 后缀，legado 解析 Referer 用）
@@ -1175,8 +1341,10 @@
 
     async function runFetch(items, bookUrl, onOne, limit){
       await mapLimit(items, limit || CONCURRENCY, async (it)=>{
-        await legadoWaitIfPaused();
+        await legadoWaitIfPaused();                 // 取消时在此抛出 __ABORT__
+        if (legadoCtrl.aborted) return;             // 取消后不再取图 / 刷新进度
         await fetchItem(bookUrl, it);
+        if (legadoCtrl.aborted) return;             // 取消后不再更新进度条
         onOne(it);
       });
     }
@@ -1262,7 +1430,7 @@
           await dbPutFile({
             id: 'f-' + Date.now() + '-' + ci, name, size: blob.size,
             createdAt: new Date().toLocaleString('zh-CN'), blob, kind: 'legado',
-            bookName, chapter: ci, broken: chBroken, seq: ++fileSeq
+            bookName, chapter: ci, broken: chBroken, seq: ++fileSeq, order: fileSeq
           });
           okChapters++; builtCnt++;
           setLegadoProg(done/total, '已生成 '+builtCnt+'/'+idxs.length+' 话 PDF');
@@ -1277,6 +1445,9 @@
         setLegadoStatus('✅ 完成！已存入文件库 '+okChapters+' 个 PDF（每话一个）'
           + (broken ? '，坏图 '+broken+' 张（点下面按钮可只重下坏图）' : '')
           + '。\n到下方「📁 文件库」可多选合并 / 下载。');
+        // 生成成功后取消章节列表里的勾选
+        document.querySelectorAll('#legadoChList input').forEach(cb => { cb.checked = false; });
+        SELECTED.clear();
         if(broken){
           $('#btnReDL').style.display='';
           $('#btnReDL').textContent='🔄 重新下载坏图 ('+broken+')';
@@ -1364,10 +1535,16 @@
       $('#btnBuild').addEventListener('click', legadoBuild);
       $('#btnPause').addEventListener('click', ()=>{
         legadoCtrl.paused = !legadoCtrl.paused;
-        // 暂停态显示「继续」并用靛蓝主色，恢复后回灰色「暂停」
-        $('#btnPause').textContent = legadoCtrl.paused ? '继续' : '暂停';
-        $('#btnPause').classList.toggle('gray', !legadoCtrl.paused);
-        if(legadoCtrl.paused) setLegadoStatus('已暂停，点「继续」恢复。');
+        if(legadoCtrl.paused){
+          $('#btnPause').textContent = '继续';
+          $('#btnPause').classList.remove('gray');            // 靛蓝主色
+          legadoCtrl.lastStatus = $('#legadoStatus').textContent;
+          setLegadoStatus('已暂停，点「继续」恢复。');
+        }else{
+          $('#btnPause').textContent = '暂停';
+          $('#btnPause').classList.add('gray');
+          if(legadoCtrl.lastStatus != null) setLegadoStatus(legadoCtrl.lastStatus);  // 恢复提示文字
+        }
       });
       $('#btnCancel').addEventListener('click', ()=>{
         legadoCtrl.aborted = true; legadoCtrl.paused = false;
@@ -1375,6 +1552,19 @@
         setLegadoStatus('正在取消…');
       });
       $('#btnReDL').addEventListener('click', legadoReDownload);
+      // 选书：放大镜输入框，输入关键字即时筛选书名/作者
+      $('#bookSearch').addEventListener('input', ()=>{
+        renderBookOptions($('#bookSearch').value.trim());
+      });
+      // 章节列表显示顺序：正序 / 倒序
+      $('#chapterOrder').addEventListener('change', ()=>{
+        chapterDisplayOrder = $('#chapterOrder').value;
+        renderChapterList();
+      });
+      // 文件库排序下拉：名称 A-Z/Z-A、时间 新→旧 / 旧→新
+      $('#fileSort').addEventListener('change', ()=>{
+        applyFileSort($('#fileSort').value);
+      });
     }
 
     // ================= 初始化 =================
