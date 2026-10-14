@@ -57,8 +57,18 @@
     .bulk.show { display: block; }
     .bulk-top { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
     .selcount { font-size: 13px; color: #6b7280; }
-    .bulk-ops { display: flex; gap: 8px; flex-wrap: wrap; }
-    .bulk-ops .btn:disabled { background: #d1d5db; cursor: not-allowed; }
+    .bulk-ops { display: flex; gap: 6px; flex-wrap: nowrap; }
+    /* 注意：要用 .btn.small 提高特异性，否则 .btn.small 的 padding/font-size 会反过来覆盖这里 */
+    .bulk-ops .btn.small { flex: 1 1 0; min-width: 0; padding: 9px 2px;
+      font-size: 13px; text-align: center; white-space: nowrap; }
+    .bulk-ops .btn.small.wide { flex: 1.8 1 0; }   /* 文字长的按钮多分一点宽度 */
+    @media (max-width: 360px) { .bulk-ops .btn.small { font-size: 12px; } }
+    @media (max-width: 340px) {
+      .bulk-ops { gap: 4px; }
+      .bulk-ops .btn.small { font-size: 11px; }
+      .bulk-ops .btn.small.wide { flex: 2.4 1 0; }  /* 320px 老屏：给长按钮更多空间 */
+    }
+    .bulk-ops .btn.small:disabled { background: #d1d5db; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -111,7 +121,7 @@
         <span class="selcount" id="pdfCount">已选 0 个</span>
       </div>
       <div class="bulk-ops">
-        <button class="btn small" id="pdfShare">打开 LocalSend</button>
+        <button class="btn small wide" id="pdfShare">打开 LocalSend</button>
         <button class="btn small gray" id="pdfRename">重命名</button>
         <button class="btn small gray" id="pdfDownload">下载</button>
         <button class="btn small danger" id="pdfDelete">删除</button>
