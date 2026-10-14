@@ -20,8 +20,9 @@
       max-width: 480px; margin: 0 auto 20px; box-shadow: 0 4px 12px rgba(0,0,0,.08); }
     #fileInput, #imgInput { display: none; }
     .btn { display: inline-block; background: #4f46e5; color: #fff; border: none;
-      border-radius: 12px; padding: 12px 22px; font-size: 15px; cursor: pointer; }
-    .btn:disabled { background: #9ca3af; }
+      border-radius: 12px; padding: 12px 22px; font-size: 15px; cursor: pointer;
+      white-space: nowrap; }
+    .btn:disabled { background: #9ca3af; cursor: not-allowed; }
     .btn.small { padding: 7px 12px; font-size: 13px; border-radius: 8px; }
     .btn.danger { background: #dc2626; }
     .btn.gray { background: #6b7280; }
@@ -69,6 +70,17 @@
       .bulk-ops .btn.small.wide { flex: 2.4 1 0; }  /* 320px 老屏：给长按钮更多空间 */
     }
     .bulk-ops .btn.small:disabled { background: #d1d5db; cursor: not-allowed; }
+    /* 主功能按钮排在同一行、不换行 */
+    .row { display: flex; align-items: center; gap: 8px; }
+    .row > .btn { flex: 1 1 0; min-width: 0; text-align: center; }
+    .row > input { flex: 1 1 0; min-width: 0; }
+    /* Legado：章节勾选行 */
+    .ch { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+      border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; margin-bottom: 4px; }
+    .ch input { width: 18px; height: 18px; accent-color: #4f46e5; flex: none; }
+    .ch span { font-size: 13px; flex: 1; min-width: 0; }
+    .legado-hint { font-size: 12px; color: #9ca3af; margin-top: 8px; line-height: 1.6; }
+    #legadoStatus { margin-top: 10px; color: #374151; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
   </style>
 </head>
 <body>
@@ -78,10 +90,12 @@
   <div class="card">
     <input type="file" id="fileInput" accept=".zip,application/zip,application/x-zip-compressed">
     <input type="file" id="imgInput" accept="image/*" multiple>
-    <button class="btn" onclick="document.getElementById('fileInput').click()">📦 ZIP 文件</button>
-    <button class="btn gray" style="margin-left:8px"
-            onclick="document.getElementById('imgInput').click()">🖼️ 图片文件</button>
-    <div class="opt" style="margin-top:14px">
+    <div class="row" style="margin-bottom:14px">
+      <button class="btn" onclick="document.getElementById('fileInput').click()">📦 ZIP 文件</button>
+      <button class="btn gray" onclick="document.getElementById('imgInput').click()">🖼️ 图片文件</button>
+      <button class="btn gray" id="btnLegadoToggle">📚 Legado</button>
+    </div>
+    <div class="opt">
       <input type="checkbox" id="mergeChk" checked>
       <label for="mergeChk">合并 ZIP 内所有文件夹为一个 PDF</label>
     </div>
@@ -98,6 +112,53 @@
     <div class="hint">单个 ZIP / 一次选择的图片合计不超过 500&nbsp;MB</div>
   </div>
 
+  <!-- ============ Legado 直连面板（默认隐藏） ============ -->
+  <div id="legadoPanel" style="display:none">
+    <div class="card">
+      <h2>📚 Legado 在线漫画</h2>
+      <label>Legado Web 服务地址</label>
+      <div class="row" style="margin-bottom:8px">
+        <input type="text" id="legadoBase" value="http://127.0.0.1:1122" placeholder="http://127.0.0.1:1122 或 手机局域网IP:1122">
+        <button class="btn small gray" id="btnShelf" style="flex:0 0 auto">读取书架</button>
+      </div>
+      <div class="legado-hint">需 Chrome/Edge（对 127.0.0.1 豁免 CORS）。Firefox 可能需同源。页面 https 打开时，127.0.0.1 混合内容 Chrome 通常也豁免。legado 设置 → 其他 → Web 服务，端口 1122 保持运行。</div>
+    </div>
+
+    <div class="card" id="legadoBookCard" style="display:none">
+      <label>选择书籍</label>
+      <select id="legadoBookSel"></select>
+      <div class="row" style="margin-top:10px">
+        <button class="btn small gray" id="btnChapters">读取章节</button>
+      </div>
+    </div>
+
+    <div class="card" id="legadoChCard" style="display:none">
+      <label>选择要转换的章节（不勾=不下载，可只转部分）</label>
+      <div class="row" style="margin-bottom:8px">
+        <button class="btn small gray" id="btnAll">全选</button>
+        <button class="btn small gray" id="btnNone">全不选</button>
+      </div>
+      <div class="row" style="margin-bottom:8px">
+        <input type="text" id="rangeFrom" placeholder="起">
+        <input type="text" id="rangeTo" placeholder="止">
+        <button class="btn small gray" id="btnRange">选范围</button>
+      </div>
+      <div id="legadoChList" style="max-height:42vh; overflow:auto"></div>
+    </div>
+
+    <div class="card" id="legadoRunCard" style="display:none">
+      <div class="row" style="margin-bottom:8px">
+        <button class="btn" id="btnBuild" style="flex:1 1 0">🚀 生成 PDF（每话一个）</button>
+      </div>
+      <button class="btn gray" id="btnReDL" style="display:none; width:100%; margin-bottom:8px">🔄 重新下载坏图</button>
+      <div class="bar-wrap" id="legadoBarWrap" style="display:block">
+        <div class="bar"><div class="bar-fill" id="legadoBarFill"></div></div>
+        <div id="legadoProgressText"></div>
+      </div>
+      <div id="legadoStatus">就绪。</div>
+    </div>
+  </div>
+
   <div class="card">
     <h2>📤 上传记录</h2>
     <div id="uploads"></div>
@@ -108,6 +169,23 @@
       </div>
       <div class="bulk-ops">
         <button class="btn small danger" id="upDelete">删除记录</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>📁 文件库（Legado 章节）</h2>
+    <div id="files"></div>
+    <div class="bulk" id="fileBulk">
+      <div class="bulk-top">
+        <button class="btn small gray" id="fileAll">全选</button>
+        <span class="selcount" id="fileCount">已选 0 个</span>
+      </div>
+      <div class="bulk-ops">
+        <button class="btn small" id="fileMerge">合并</button>
+        <button class="btn small gray" id="fileDownload">下载</button>
+        <button class="btn small gray" id="fileRename">重命名</button>
+        <button class="btn small danger" id="fileDelete">删除</button>
       </div>
     </div>
   </div>
@@ -131,25 +209,18 @@
 
   <script src="vendor/jszip.min.js"></script>
   <script src="vendor/jspdf.umd.min.js"></script>
+  <script src="vendor/pdf-lib.min.js"></script>
   <script>
     let db = null;
 
     // ============ 依赖库兜底加载 ============
-    // 优先用随页面一起上传的 vendor/ 本地库；若缺失（例如上传时漏了该目录）
-    // 则自动回退到公共 CDN，保证在任何静态空间都能跑起来。
     const LIBS = [
-      {
-        name: 'JSZip',
-        ok: () => typeof JSZip !== 'undefined',
-        local: 'vendor/jszip.min.js',
-        cdn: 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
-      },
-      {
-        name: 'jsPDF',
-        ok: () => !!(window.jspdf && window.jspdf.jsPDF),
-        local: 'vendor/jspdf.umd.min.js',
-        cdn: 'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js'
-      }
+      { name: 'JSZip',  ok: () => typeof JSZip !== 'undefined',
+        local: 'vendor/jszip.min.js',   cdn: 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js' },
+      { name: 'jsPDF',  ok: () => !!(window.jspdf && window.jspdf.jsPDF),
+        local: 'vendor/jspdf.umd.min.js', cdn: 'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js' },
+      { name: 'pdf-lib', ok: () => typeof PDFLib !== 'undefined',
+        local: 'vendor/pdf-lib.min.js',   cdn: 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js' }
     ];
     function loadScript(src) {
       return new Promise((res, rej) => {
@@ -166,33 +237,22 @@
         try { await loadScript(lib.cdn); } catch (e) { /* CDN 也失败 */ }
       }
     }
-
-    // 依赖库自检（本地 vendor 加载失败时给出明确提示）
     function checkLibs() {
       const missing = [];
       if (typeof JSZip === 'undefined') missing.push('JSZip');
       if (!window.jspdf || !window.jspdf.jsPDF) missing.push('jsPDF');
-      if (missing.length) {
-        document.getElementById('status').innerHTML =
-          '<span style="color:#dc2626">⚠️ 依赖库加载失败：' + missing.join('、') +
-          '<br>请确认 vendor/ 目录已随网页一起上传（GitHub Pages 需包含该文件夹）</span>';
-        return false;
-      }
-      return true;
+      return missing; // 注意：pdf-lib 仅合并时用，缺失时不强制阻断首页
     }
 
     // ================= IndexedDB 存储 =================
     function openDB() {
       return new Promise((res, rej) => {
-        const req = indexedDB.open('zip2pdf', 2);   // v2 起新增 uploads（上传记录）
+        const req = indexedDB.open('zip2pdf', 3);   // v3 新增 files（legado 文件库）
         req.onupgradeneeded = () => {
           const database = req.result;
-          if (!database.objectStoreNames.contains('pdfs')) {
-            database.createObjectStore('pdfs', { keyPath: 'id' });
-          }
-          if (!database.objectStoreNames.contains('uploads')) {
-            database.createObjectStore('uploads', { keyPath: 'id' });
-          }
+          if (!database.objectStoreNames.contains('pdfs'))    database.createObjectStore('pdfs',   { keyPath: 'id' });
+          if (!database.objectStoreNames.contains('uploads')) database.createObjectStore('uploads', { keyPath: 'id' });
+          if (!database.objectStoreNames.contains('files'))   database.createObjectStore('files',   { keyPath: 'id' });
         };
         req.onsuccess = () => res(req.result);
         req.onerror = rej;
@@ -218,7 +278,6 @@
         tx.oncomplete = res; tx.onerror = rej;
       });
     }
-
     // ---------- 上传记录（uploads）----------
     async function dbPutUpload(record) {
       return new Promise((res, rej) => {
@@ -240,10 +299,29 @@
         tx.oncomplete = res; tx.onerror = rej;
       });
     }
+    // ---------- 文件库（files：legado 每话一个 PDF）----------
+    async function dbPutFile(record) {
+      return new Promise((res, rej) => {
+        const tx = db.transaction('files', 'readwrite');
+        tx.objectStore('files').put(record);
+        tx.oncomplete = res; tx.onerror = rej;
+      });
+    }
+    async function dbAllFiles() {
+      return new Promise((res, rej) => {
+        const req = db.transaction('files').objectStore('files').getAll();
+        req.onsuccess = () => res(req.result); req.onerror = rej;
+      });
+    }
+    async function dbDeleteFile(id) {
+      return new Promise((res, rej) => {
+        const tx = db.transaction('files', 'readwrite');
+        tx.objectStore('files').delete(id);
+        tx.oncomplete = res; tx.onerror = rej;
+      });
+    }
 
     // ================= 分组：按顶层文件夹分组 =================
-    // 支持的图片扩展名（浏览器 canvas 可解码的都列入；
-    // heic/tiff 等无法原生解码的格式会被识别并在转换时跳过并提示）
     const IMAGE_RE = /\.(jpe?g|jpe|png|webp|bmp|gif|avif|ico|svg|tiff?|heic|heif)$/i;
 
     function groupByFolder(zip) {
@@ -251,7 +329,6 @@
       const entries = Object.values(zip.files).filter(f => !f.dir);
       for (const f of entries) {
         if (!IMAGE_RE.test(f.name)) continue;
-        // 跳过 macOS 打包产生的缩略图与隐藏文件
         if (/__MACOSX/i.test(f.name) || /(^|\/)\.[^/]/.test(f.name)) continue;
         const parts = f.name.split('/');
         const folder = parts.length > 1 ? parts[0] : '';
@@ -259,11 +336,9 @@
         groups.get(folder).push(f);
       }
       const keys = [...groups.keys()];
-      // 文件夹名全是纯数字时按数值排序（乱码不影响）
       if (keys.every(k => k === '' || /^\d+$/.test(k))) {
         keys.sort((a, b) => (a === '' ? -1 : b === '' ? 1 : Number(a) - Number(b)));
       }
-      // 每个文件夹内图片按数字排序：0.jpg, 1.jpg, … 20.jpg
       return keys.map(k => ({
         folder: k,
         images: groups.get(k).sort((a, b) =>
@@ -271,19 +346,13 @@
       }));
     }
 
-    // ================= 从 zip 文件名解析起始话数 =================
-    // 11-15.zip → 11；108.zip → 108；无数字 → null
     function parseStartChapter(zipBaseName) {
       const m = zipBaseName.match(/\d+/);
       return m ? parseInt(m[0], 10) : null;
     }
 
-    // 统一输出质量（canvas 重编码用，0.92 肉眼几乎无损且体积可控）
     const JPEG_QUALITY = 0.92;
 
-    // ================= 把任意浏览器可解码的图片转成 JPEG dataURL =================
-    // 1) 白底填充：PNG/WebP/GIF 的透明区域转成 JPEG 后不会变黑
-    // 2) 统一成 JPEG：jsPDF 用 DCTDecode 嵌入，体积最小、兼容性最好
     function toJpegDataURL(blob) {
       return new Promise((res, rej) => {
         const url = URL.createObjectURL(blob);
@@ -291,7 +360,6 @@
         img.onload = () => {
           URL.revokeObjectURL(url);
           try {
-            // SVG 未声明尺寸时浏览器会给出 0，兜底为 1024
             const w = img.naturalWidth || 1024;
             const h = img.naturalHeight || 1024;
             const c = document.createElement('canvas');
@@ -301,7 +369,6 @@
             g.fillRect(0, 0, w, h);
             g.drawImage(img, 0, 0, w, h);
             const dataUrl = c.toDataURL('image/jpeg', JPEG_QUALITY);
-            // 超大图在 iOS 上可能导出失败，返回近乎空串
             if (!dataUrl || dataUrl.length < 200) {
               rej(new Error('图片过大，浏览器无法处理'));
             } else {
@@ -317,8 +384,6 @@
       });
     }
 
-    // ================= 生成一个 PDF =================
-    // 返回 { blob, skipped }：skipped 为解码失败被跳过的文件名
     async function buildPDF(images, onProgress) {
       const jsPDF = window.jspdf && window.jspdf.jsPDF;
       if (!jsPDF) throw new Error('jsPDF 未加载，请检查 vendor/jspdf.umd.min.js');
@@ -346,10 +411,25 @@
       return { blob: doc.output('blob'), skipped };
     }
 
-    // ================= 大小限制与进度条 =================
-    const MAX_BYTES = 500 * 1024 * 1024;   // 上传上限 500 MB
+    // 用一组 {dataUrl,w,h} 页面生成 A4 PDF blob（供 legado 单话 / 重下重建使用）
+    function buildPdfBlob(pages) {
+      const jsPDF = window.jspdf.jsPDF;
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+      const pw = doc.internal.pageSize.getWidth();
+      const ph = doc.internal.pageSize.getHeight();
+      let n = 0;
+      for (const p of pages) {
+        if (n > 0) doc.addPage();
+        const scale = Math.min(pw / p.w, ph / p.h);
+        const w = p.w * scale, h = p.h * scale;
+        doc.addImage(p.dataUrl, 'JPEG', (pw - w) / 2, (ph - h) / 2, w, h);
+        n++;
+      }
+      return doc.output('blob');
+    }
+
+    const MAX_BYTES = 500 * 1024 * 1024;
     const MAX_LABEL = '500 MB';
-    // 单个 PDF 的提醒阈值（只是提示，不阻止生成）
     const BIG_PDF_BYTES = 200 * 1024 * 1024;
     const BIG_PDF_LABEL = '200 MB';
 
@@ -358,7 +438,6 @@
       return Math.max(1, Math.round(bytes / 1024)) + ' KB';
     }
 
-    // percent: 0~100；label: 当前阶段说明
     function setProgress(percent, label) {
       document.getElementById('barWrap').style.display = 'block';
       document.getElementById('barFill').style.width =
@@ -369,7 +448,6 @@
       document.getElementById('barWrap').style.display = 'none';
     }
 
-    // 读取文件并回报真实读取进度（FileReader.onprogress）
     function readFileWithProgress(file, onProgress) {
       return new Promise((res, rej) => {
         const r = new FileReader();
@@ -380,7 +458,6 @@
       });
     }
 
-    // ================= 被跳过的图片的提示文案 =================
     function skippedNote(skipped) {
       if (!skipped || !skipped.length) return '';
       const heic = skipped.filter(n => /\.hei[cf]$/i.test(n)).length;
@@ -390,24 +467,22 @@
       return `｜跳过 ${skipped.length} 张无法解码的图片`;
     }
 
-    // ================= 转换主流程 =================
+    // ================= 转换主流程（ZIP）=================
     document.getElementById('fileInput').addEventListener('change', async (e) => {
       const file = e.target.files[0];
       e.target.value = '';
       if (!file) return;
       await ensureLibs();
-      if (!checkLibs()) return;
+      const missing = checkLibs();
+      if (missing.length) { reportLibMissing(missing); return; }
 
       const status = document.getElementById('status');
-      // ===== 500 MB 上限 =====
       if (file.size > MAX_BYTES) {
         hideProgress();
         status.innerHTML = '<span style="color:#dc2626">⚠️ 文件 ' + fmtSize(file.size) +
           ' 超过 ' + MAX_LABEL + ' 上限，请拆分压缩包后再上传</span>';
-        await addUpload({
-          name: file.name, size: file.size, kind: 'zip',
-          note: '超过 ' + MAX_LABEL + ' 上限，未转换', ok: false
-        });
+        await addUpload({ name: file.name, size: file.size, kind: 'zip',
+          note: '超过 ' + MAX_LABEL + ' 上限，未转换', ok: false });
         return;
       }
 
@@ -415,7 +490,6 @@
       setProgress(0, '读取文件中…（' + fmtSize(file.size) + '）');
       status.textContent = '';
       try {
-        // 阶段一：读取文件（真实进度，占前 15%）
         const buf = await readFileWithProgress(file, p => {
           setProgress(p * 15, '读取文件中… ' + Math.round(p * 100) + '%（' + fmtSize(file.size) + '）');
         });
@@ -426,147 +500,108 @@
         if (!totalImages) {
           hideProgress();
           status.textContent = 'ZIP 里没有找到图片（支持 jpg/png/webp/bmp/gif/avif/svg 等）';
-          await addUpload({
-            name: file.name, size: file.size, kind: 'zip',
-            detail: '0 张图片', note: status.textContent, ok: false
-          });
+          await addUpload({ name: file.name, size: file.size, kind: 'zip',
+            detail: '0 张图片', note: status.textContent, ok: false });
           return;
         }
 
         const baseName = file.name.replace(/\.zip$/i, '');
         const startChapter = parseStartChapter(baseName);
-        let convDone = 0;      // 跨 PDF 累计已处理页数，用于总体进度
+        let convDone = 0;
         let allSkipped = [];
 
         if (merge) {
-          // ===== 合并模式：所有文件夹 → 一个 PDF，名字 = zip 名 =====
           const allImages = groups.flatMap(g => g.images);
           const { blob: pdfBlob, skipped } = await buildPDF(allImages, (i) => {
-            setProgress(15 + (i + 1) / allImages.length * 85,
-              '转换图片 ' + (i + 1) + '/' + allImages.length);
+            setProgress(15 + (i + 1) / allImages.length * 85, '转换图片 ' + (i + 1) + '/' + allImages.length);
           });
           allSkipped = skipped;
-          await dbPut({
-            id: Date.now() + '',
-            name: `${baseName}.pdf`,
-            size: pdfBlob.size,
-            createdAt: new Date().toLocaleString('zh-CN'),
-            sent: false,
-            blob: pdfBlob
-          });
+          await dbPut({ id: Date.now() + '', name: `${baseName}.pdf`, size: pdfBlob.size,
+            createdAt: new Date().toLocaleString('zh-CN'), sent: false, blob: pdfBlob });
           setProgress(100, '完成 ✔');
-          status.textContent =
-            `已合并为 1 个 PDF（共 ${allImages.length - skipped.length} 页）` +
-            skippedNote(skipped);
-          await addUpload({
-            name: file.name, size: file.size, kind: 'zip',
+          status.textContent = `已合并为 1 个 PDF（共 ${allImages.length - skipped.length} 页）` + skippedNote(skipped);
+          await addUpload({ name: file.name, size: file.size, kind: 'zip',
             detail: totalImages + ' 张图片 · ' + groups.length + ' 个文件夹',
-            result: '1 个 PDF · ' + (allImages.length - skipped.length) + ' 页', ok: true
-          });
+            result: '1 个 PDF · ' + (allImages.length - skipped.length) + ' 页', ok: true });
         } else {
-          // ===== 分话模式：每个文件夹 → 第X话.pdf =====
           for (let gi = 0; gi < groups.length; gi++) {
             const g = groups[gi];
             const pdfName = startChapter !== null && groups.length > 1
               ? `第${startChapter + gi}话.pdf`
               : (groups.length > 1 ? `${baseName}-${gi + 1}.pdf` : `${baseName}.pdf`);
-
             const { blob: pdfBlob, skipped } = await buildPDF(g.images, () => {
               convDone++;
-              setProgress(15 + convDone / totalImages * 85,
-                '转换中 ' + convDone + '/' + totalImages +
+              setProgress(15 + convDone / totalImages * 85, '转换中 ' + convDone + '/' + totalImages +
                 '（第 ' + (gi + 1) + '/' + groups.length + ' 个 PDF）');
             });
             allSkipped = allSkipped.concat(skipped);
-
-            await dbPut({
-              id: Date.now() + '-' + gi,
-              name: pdfName,
-              size: pdfBlob.size,
-              createdAt: new Date().toLocaleString('zh-CN'),
-              sent: false,
-              blob: pdfBlob
-            });
+            await dbPut({ id: Date.now() + '-' + gi, name: pdfName, size: pdfBlob.size,
+              createdAt: new Date().toLocaleString('zh-CN'), sent: false, blob: pdfBlob });
             renderLibrary();
           }
           setProgress(100, '全部完成 ✔');
-          status.textContent =
-            `共生成 ${groups.length} 个 PDF` + skippedNote(allSkipped);
-          await addUpload({
-            name: file.name, size: file.size, kind: 'zip',
+          status.textContent = `共生成 ${groups.length} 个 PDF` + skippedNote(allSkipped);
+          await addUpload({ name: file.name, size: file.size, kind: 'zip',
             detail: totalImages + ' 张图片 · ' + groups.length + ' 个文件夹',
-            result: groups.length + ' 个 PDF', ok: true
-          });
+            result: groups.length + ' 个 PDF', ok: true });
         }
         renderLibrary();
       } catch (err) {
         status.textContent = '出错了：' + err.message;
-        await addUpload({
-          name: file.name, size: file.size, kind: 'zip',
-          note: err.message, ok: false
-        });
+        await addUpload({ name: file.name, size: file.size, kind: 'zip', note: err.message, ok: false });
       }
     });
 
-    // ================= 直接选图片 → 合成一个 PDF =================
+    // ================= 直接选图片 =================
     document.getElementById('imgInput').addEventListener('change', async (e) => {
       const files = Array.from(e.target.files || []);
       e.target.value = '';
       if (!files.length) return;
       await ensureLibs();
-      if (!checkLibs()) return;
+      const missing = checkLibs();
+      if (missing.length) { reportLibMissing(missing); return; }
       const status = document.getElementById('status');
 
-      // ===== 500 MB 上限（按本次选择的总大小）=====
       const totalBytes = files.reduce((s, f) => s + f.size, 0);
       if (totalBytes > MAX_BYTES) {
         hideProgress();
         status.innerHTML = '<span style="color:#dc2626">⚠️ 所选图片合计 ' + fmtSize(totalBytes) +
           ' 超过 ' + MAX_LABEL + ' 上限，请少选一些</span>';
-        await addUpload({
-          name: files.length + ' 张图片', size: totalBytes, kind: 'images',
-          detail: files.length + ' 张', note: '超过 ' + MAX_LABEL + ' 上限，未转换', ok: false
-        });
+        await addUpload({ name: files.length + ' 张图片', size: totalBytes, kind: 'images',
+          detail: files.length + ' 张', note: '超过 ' + MAX_LABEL + ' 上限，未转换', ok: false });
         return;
       }
 
       setProgress(0, '准备中…（' + files.length + ' 张，' + fmtSize(totalBytes) + '）');
       status.textContent = '';
       try {
-        // 按文件名自然排序，保证 1.jpg / 2.jpg / 10.jpg 顺序正确
         files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-        // 包装成与 JSZip 条目一致的结构，复用 buildPDF
         const items = files.map(f => ({ name: f.name, async: () => Promise.resolve(f) }));
         const { blob: pdfBlob, skipped } = await buildPDF(items, (i) => {
           setProgress((i + 1) / items.length * 100, '转换图片 ' + (i + 1) + '/' + items.length);
         });
         const d = new Date();
         const pad = n => String(n).padStart(2, '0');
-        await dbPut({
-          id: 'img-' + Date.now(),
+        await dbPut({ id: 'img-' + Date.now(),
           name: `图片_${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}.pdf`,
-          size: pdfBlob.size,
-          createdAt: d.toLocaleString('zh-CN'),
-          sent: false,
-          blob: pdfBlob
-        });
+          size: pdfBlob.size, createdAt: d.toLocaleString('zh-CN'), sent: false, blob: pdfBlob });
         setProgress(100, '完成 ✔');
-        status.textContent =
-          `${items.length - skipped.length} 张图已合成 1 个 PDF` + skippedNote(skipped);
-        await addUpload({
-          name: files.length + ' 张图片', size: totalBytes, kind: 'images',
-          detail: files.length + ' 张',
-          result: '1 个 PDF · ' + (items.length - skipped.length) + ' 页', ok: true
-        });
+        status.textContent = `${items.length - skipped.length} 张图已合成 1 个 PDF` + skippedNote(skipped);
+        await addUpload({ name: files.length + ' 张图片', size: totalBytes, kind: 'images',
+          detail: files.length + ' 张', result: '1 个 PDF · ' + (items.length - skipped.length) + ' 页', ok: true });
         renderLibrary();
       } catch (err) {
         status.textContent = '出错了：' + err.message;
-        await addUpload({
-          name: files.length + ' 张图片', size: totalBytes, kind: 'images',
-          detail: files.length + ' 张', note: err.message, ok: false
-        });
+        await addUpload({ name: files.length + ' 张图片', size: totalBytes, kind: 'images',
+          detail: files.length + ' 张', note: err.message, ok: false });
       }
     });
+
+    function reportLibMissing(missing) {
+      document.getElementById('status').innerHTML =
+        '<span style="color:#dc2626">⚠️ 依赖库加载失败：' + missing.join('、') +
+        '<br>请确认 vendor/ 目录已随网页一起上传（GitHub Pages 需包含该文件夹）</span>';
+    }
 
     // ================= 上传记录 =================
     function escapeHtml(s) {
@@ -574,18 +609,12 @@
         ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
 
-    // info: { name, size, kind:'zip'|'images', detail?, result?, note?, ok }
     async function addUpload(info) {
       await dbPutUpload({
         id: 'u-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
-        name: info.name,
-        size: info.size,
-        kind: info.kind,
-        detail: info.detail || '',
-        result: info.result || '',
-        note: info.note || '',
-        ok: !!info.ok,
-        createdAt: new Date().toLocaleString('zh-CN')
+        name: info.name, size: info.size, kind: info.kind,
+        detail: info.detail || '', result: info.result || '', note: info.note || '',
+        ok: !!info.ok, createdAt: new Date().toLocaleString('zh-CN')
       });
       renderUploads();
     }
@@ -630,26 +659,32 @@
     // ================= 多选状态 =================
     const selPdfs = new Set();
     const selUploads = new Set();
+    const selFiles = new Set();
+    let fileSeq = 0;
 
-    // 更新列表底部的操作栏：显示已选数量、控制按钮可用性
     function updateBulkBar(kind, total) {
-      const prefix = kind === 'up' ? 'up' : 'pdf';
+      const prefix = kind === 'up' ? 'up' : kind === 'file' ? 'file' : 'pdf';
       const bulk = document.getElementById(prefix + 'Bulk');
       const count = document.getElementById(prefix + 'Count');
-      const set = kind === 'up' ? selUploads : selPdfs;
       if (!bulk || !count) return;
       if (!total) { bulk.classList.remove('show'); return; }
       bulk.classList.add('show');
+      const set = kind === 'up' ? selUploads : kind === 'file' ? selFiles : selPdfs;
       const n = set.size;
-      count.textContent = kind === 'up'
-        ? (n ? '已选 ' + n + ' 条' : '共 ' + total + ' 条')
-        : (n ? '已选 ' + n + ' 个' : '共 ' + total + ' 个');
-      document.getElementById(prefix + 'All').textContent = n === total ? '取消全选' : '全选';
+      count.textContent = (n ? '已选 ' + n + ' 个' : '共 ' + total + ' 个');
+      const allBtn = document.getElementById(prefix + 'All');
+      if (allBtn) allBtn.textContent = n === total ? '取消全选' : '全选';
+
       if (kind === 'pdf') {
         document.getElementById('pdfShare').disabled = n === 0;
         document.getElementById('pdfDownload').disabled = n === 0;
         document.getElementById('pdfDelete').disabled = n === 0;
-        document.getElementById('pdfRename').disabled = n !== 1;   // 重命名只能单个
+        document.getElementById('pdfRename').disabled = n !== 1;
+      } else if (kind === 'file') {
+        document.getElementById('fileMerge').disabled = n === 0;
+        document.getElementById('fileDownload').disabled = n === 0;
+        document.getElementById('fileDelete').disabled = n === 0;
+        document.getElementById('fileRename').disabled = n !== 1;
       } else {
         document.getElementById('upDelete').disabled = n === 0;
       }
@@ -671,7 +706,6 @@
         const div = document.createElement('div');
         const on = selPdfs.has(rec.id);
         div.className = 'item' + (on ? ' sel' : '');
-        // 单个 PDF 过大只是提醒，不阻止生成
         const bigWarn = rec.size > BIG_PDF_BYTES
           ? '<div class="meta" style="color:#dc2626">⚠️ 超过 ' + BIG_PDF_LABEL +
             '：多数邮箱附件和在线上传都有此限制，建议拆成多个 PDF</div>'
@@ -694,18 +728,50 @@
       updateBulkBar('pdf', list.length);
     }
 
-    // ================= 重命名 =================
-    async function rename(rec) {
+    // ================= 文件库列表（legado 每话 PDF）=================
+    async function renderFiles() {
+      const list = await dbAllFiles();
+      const el = document.getElementById('files');
+      if (!list.length) {
+        el.innerHTML = '<div class="empty">还没有文件。展开上方「📚 Legado」连接手机漫画，选章生成</div>';
+        selFiles.clear();
+        updateBulkBar('file', 0);
+        return;
+      }
+      el.innerHTML = '';
+      // 按 seq 升序（即生成顺序 = 话数顺序），保持与漫画顺序一致
+      list.sort((a, b) => (a.seq || 0) - (b.seq || 0))
+          .forEach(rec => {
+        const div = document.createElement('div');
+        const on = selFiles.has(rec.id);
+        div.className = 'item' + (on ? ' sel' : '');
+        const brokenBadge = rec.broken
+          ? '<span style="color:#dc2626"> ⚠️ 含坏图</span>' : '';
+        div.innerHTML =
+          '<div class="pickrow">' +
+            '<input type="checkbox"' + (on ? ' checked' : '') + '>' +
+            '<span class="name">📄 ' + escapeHtml(rec.name) + brokenBadge + '</span>' +
+          '</div>' +
+          '<div class="meta">' + rec.createdAt + ' · ' + fmtSize(rec.size) + '</div>';
+        div.onclick = () => {
+          selFiles.has(rec.id) ? selFiles.delete(rec.id) : selFiles.add(rec.id);
+          renderFiles();
+        };
+        el.appendChild(div);
+      });
+      updateBulkBar('file', list.length);
+    }
+
+    async function rename(rec, store) {
       const newName = prompt('输入新的文件名（可不含 .pdf 后缀，会自动补上）：', rec.name);
       if (!newName || !newName.trim()) return;
       let name = newName.trim();
       if (!/\.pdf$/i.test(name)) name += '.pdf';
-      await dbPut({ ...rec, name });
-      renderLibrary();
+      if (store === 'file') { await dbPutFile({ ...rec, name }); renderFiles(); }
+      else { await dbPut({ ...rec, name }); renderLibrary(); }
     }
 
     // ================= 通用确认弹窗 =================
-    // 返回 Promise<boolean>：点确定 true，取消 / 点遮罩 false
     function askConfirm(opts) {
       return new Promise(res => {
         const mask = document.createElement('div');
@@ -724,7 +790,6 @@
         mask.querySelector('[data-act=yes]').textContent = opts.okText || '确定';
         document.body.appendChild(mask);
         mask.style.display = 'flex';
-
         const close = v => { mask.remove(); res(v); };
         mask.querySelector('[data-act=no]').onclick = () => close(false);
         mask.querySelector('[data-act=yes]').onclick = () => close(true);
@@ -733,72 +798,45 @@
     }
 
     // ================= 分享到其它 App（LocalSend 等）=================
-    // 用 Web Share API 拉起系统分享面板，再手动选择 LocalSend 接收。
-    // 两个硬性条件：① 页面必须是 HTTPS ② 必须由用户点击直接触发（不能放在 await 之后）。
-    // 文件不会先落到「下载」文件夹，而是直接交给系统面板。
-    // recs: 一条或多条 PDF 记录（Web Share 支持一次分享多个文件）
     async function shareFiles(recs) {
       if (!recs || !recs.length) return;
       const status = document.getElementById('status');
       const files = recs.map(r => new File([r.blob], r.name, { type: 'application/pdf' }));
       let shareErr = null;
-
-      // canShare() 只接受 files 属性，且只在它明确返回 false 时才放弃
       const blocked = !!(navigator.canShare && navigator.canShare({ files }) === false);
-
-      // ⚠️ 只尝试一次，绝不重试：share() 会消耗用户手势，重试必抛 NotAllowedError
       if (navigator.share && !blocked) {
         try {
-          await navigator.share({
-            files,
-            title: recs.length === 1 ? recs[0].name : recs.length + ' 个 PDF'
-          });
+          await navigator.share({ files, title: recs.length === 1 ? recs[0].name : recs.length + ' 个 PDF' });
           for (const r of recs) await dbPut({ ...r, sent: true });
           renderLibrary();
           return;
         } catch (e) {
-          if (e.name === 'AbortError') return;   // 用户在面板里取消
+          if (e.name === 'AbortError') return;
           shareErr = e;
         }
       }
-
-      // 先弹窗说明情况，由用户自己决定要不要下载，不擅自落文件
       const wantDownload = await askConfirm({
         title: '无法调起系统分享面板',
         message: '当前浏览器不支持直接分享文件。' +
           (shareErr ? '<br>原因：' + escapeHtml(shareErr.name || '未知') : '') +
           '<br><br>是否改为<b>下载到本机</b>？',
-        okText: '直接下载',
-        cancelText: '取消'
+        okText: '直接下载', cancelText: '取消'
       });
-
-      if (!wantDownload) {
-        status.textContent = '已取消，未下载。';
-        return;
-      }
-
-      for (const r of recs) {
-        download(r);
-        await new Promise(res => setTimeout(res, 400));  // 多个下载之间留点间隔
-      }
+      if (!wantDownload) { status.textContent = '已取消，未下载。'; return; }
+      for (const r of recs) { download(r); await new Promise(res => setTimeout(res, 400)); }
       status.textContent = '已下载 ' + recs.length + ' 个文件到本机。';
       for (const r of recs) await dbPut({ ...r, sent: true });
       renderLibrary();
     }
 
-    // ================= 下载 / 删除 =================
     function download(rec) {
       const url = URL.createObjectURL(rec.blob);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = rec.name;
-      document.body.appendChild(a);
-      a.click();
-      // 延迟释放，立即 revoke 会导致部分浏览器下载失败
+      a.href = url; a.download = rec.name;
+      document.body.appendChild(a); a.click();
       setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
     }
 
-    // ================= 批量操作（底部操作栏）=================
     async function selectedPdfs() {
       const list = await dbAll();
       return list.filter(r => selPdfs.has(r.id));
@@ -806,6 +844,11 @@
     async function selectedUploads() {
       const list = await dbAllUploads();
       return list.filter(r => selUploads.has(r.id));
+    }
+    async function selectedFiles() {
+      const list = await dbAllFiles();
+      // 保持选择顺序按 seq 排序，合并时顺序与漫画一致
+      return list.filter(r => selFiles.has(r.id)).sort((a, b) => (a.seq || 0) - (b.seq || 0));
     }
 
     function bindBulk() {
@@ -816,28 +859,21 @@
         else list.forEach(r => selPdfs.add(r.id));
         renderLibrary();
       };
-      document.getElementById('pdfShare').onclick = async () => {
-        shareFiles(await selectedPdfs());
-      };
+      document.getElementById('pdfShare').onclick = async () => { shareFiles(await selectedPdfs()); };
       document.getElementById('pdfDownload').onclick = async () => {
         const recs = await selectedPdfs();
-        for (const r of recs) {
-          download(r);
-          await new Promise(res => setTimeout(res, 400));  // 多个下载间留间隔
-        }
+        for (const r of recs) { download(r); await new Promise(res => setTimeout(res, 400)); }
         document.getElementById('status').textContent = '已下载 ' + recs.length + ' 个文件。';
       };
       document.getElementById('pdfRename').onclick = async () => {
         const recs = await selectedPdfs();
-        if (recs.length === 1) rename(recs[0]);
+        if (recs.length === 1) rename(recs[0], 'pdf');
       };
       document.getElementById('pdfDelete').onclick = async () => {
         const recs = await selectedPdfs();
         if (!recs.length) return;
         const okd = await askConfirm({
-          title: '删除所选 PDF',
-          message: '将删除选中的 <b>' + recs.length + '</b> 个 PDF（App 内副本）。<br>' +
-            '已下载到手机里的原件请自行删除。',
+          title: '删除所选 PDF', message: '将删除选中的 <b>' + recs.length + '</b> 个 PDF（App 内副本）。<br>已下载到手机里的原件请自行删除。',
           okText: '删除', cancelText: '取消'
         });
         if (!okd) return;
@@ -856,31 +892,422 @@
         const recs = await selectedUploads();
         if (!recs.length) return;
         const okd = await askConfirm({
-          title: '删除上传记录',
-          message: '将删除选中的 <b>' + recs.length + '</b> 条记录（不影响已生成的 PDF）。',
+          title: '删除上传记录', message: '将删除选中的 <b>' + recs.length + '</b> 条记录（不影响已生成的 PDF）。',
           okText: '删除', cancelText: '取消'
         });
         if (!okd) return;
         for (const r of recs) { await dbDeleteUpload(r.id); selUploads.delete(r.id); }
         renderUploads();
       };
+
+      // ---- 文件库（legado）----
+      document.getElementById('fileAll').onclick = async () => {
+        const list = await dbAllFiles();
+        if (selFiles.size === list.length) selFiles.clear();
+        else list.forEach(r => selFiles.add(r.id));
+        renderFiles();
+      };
+      document.getElementById('fileMerge').onclick = async () => {
+        const recs = await selectedFiles();
+        if (recs.length < 2) { setLegadoStatus('合并至少需要选择 2 个文件。'); return; }
+        await mergeFiles(recs);
+      };
+      document.getElementById('fileDownload').onclick = async () => {
+        const recs = await selectedFiles();
+        for (const r of recs) { download(r); await new Promise(res => setTimeout(res, 400)); }
+        setLegadoStatus('已下载 ' + recs.length + ' 个文件。');
+      };
+      document.getElementById('fileRename').onclick = async () => {
+        const recs = await selectedFiles();
+        if (recs.length === 1) rename(recs[0], 'file');
+      };
+      document.getElementById('fileDelete').onclick = async () => {
+        const recs = await selectedFiles();
+        if (!recs.length) return;
+        const okd = await askConfirm({
+          title: '删除所选文件', message: '将删除选中的 <b>' + recs.length + '</b> 个文件（App 内副本）。',
+          okText: '删除', cancelText: '取消'
+        });
+        if (!okd) return;
+        for (const r of recs) { await dbDeleteFile(r.id); selFiles.delete(r.id); }
+        renderFiles();
+      };
+    }
+
+    // ================= 合并多个 PDF（pdf-lib）=================
+    async function mergeFiles(recs) {
+      const status = document.getElementById('legadoStatus');
+      await ensureLibs();
+      if (typeof PDFLib === 'undefined') {
+        setLegadoStatus('⚠️ 合并所需 pdf-lib 未加载，请确认 vendor/pdf-lib.min.js 已上传。');
+        return;
+      }
+      setLegadoStatus('合并中：' + recs.length + ' 个文件…');
+      try {
+        const merged = await PDFLib.PDFDocument.create();
+        for (const r of recs) {
+          const bytes = await r.blob.arrayBuffer();
+          const src = await PDFLib.PDFDocument.load(bytes);
+          const pages = await merged.copyPages(src, src.getPageIndices());
+          pages.forEach(p => merged.addPage(p));
+        }
+        const out = await merged.save();
+        const blob = new Blob([out], { type: 'application/pdf' });
+        const name = '合并_' + recs.length + '个.pdf';
+        await dbPutFile({
+          id: 'f-' + Date.now(), name, size: blob.size,
+          createdAt: new Date().toLocaleString('zh-CN'), blob, kind: 'legado',
+          chapter: null, broken: false, seq: ++fileSeq
+        });
+        renderFiles();
+        setLegadoStatus('✅ 已合并为 1 个 PDF：' + name + '（已存入文件库，可下载）');
+      } catch (e) {
+        setLegadoStatus('合并失败：' + e.message);
+      }
+    }
+
+    // ============================================================
+    // ================= Legado 直连转 PDF =================
+    // ============================================================
+    let BOOKS = [], CHAPTERS = [], SELECTED = new Set(), IMAGES = [];
+    const CONCURRENCY = 8;
+    const RETRIES = 2;
+    const PLACEHOLDER_BYTES = 50000;
+    const VAR_THRESHOLD = 4;
+
+    const $ = s => document.querySelector(s);
+    function setLegadoStatus(t){ $('#legadoStatus').textContent = t; }
+    function setLegadoProg(p, label){
+      document.getElementById('legadoBarWrap').style.display = 'block';
+      document.getElementById('legadoBarFill').style.width = Math.max(0,Math.min(100,p*100)).toFixed(1) + '%';
+      if(label) document.getElementById('legadoProgressText').textContent = label;
+    }
+
+    async function legadoApi(path){
+      const base = $('#legadoBase').value.trim().replace(/\/+$/,'');
+      const res = await fetch(base + path, {mode:'cors', cache:'no-store'});
+      if(!res.ok) throw new Error('HTTP '+res.status+' @ '+path);
+      return res;
+    }
+
+    async function loadShelf(){
+      try{
+        setLegadoStatus('正在读取书架…');
+        const res = await legadoApi('/getBookshelf');
+        const data = await res.json();
+        BOOKS = Array.isArray(data) ? data : (data.data || []);
+        if(!BOOKS.length){ setLegadoStatus('书架为空'); return; }
+        const sel = $('#legadoBookSel'); sel.innerHTML = '';
+        BOOKS.forEach((b,i)=>{
+          const o = document.createElement('option');
+          o.value = i;
+          o.textContent = (b.name || b.bookName || ('书籍'+i)) + '  ' + (b.author?('· '+b.author):'');
+          sel.appendChild(o);
+        });
+        $('#legadoBookCard').style.display='';
+        setLegadoStatus('共 '+BOOKS.length+' 本，请选择。');
+      }catch(e){
+        setLegadoStatus('读取书架失败：'+e.message+'\n（确认 legado Web 服务已开启、地址正确）');
+      }
+    }
+
+    async function loadChapters(){
+      const b = BOOKS[+$('#legadoBookSel').value];
+      if(!b) return;
+      const bookUrl = b.bookUrl || b.url;
+      try{
+        setLegadoStatus('读取章节中…');
+        const res = await legadoApi('/getChapterList?url='+encodeURIComponent(bookUrl));
+        const data = await res.json();
+        CHAPTERS = Array.isArray(data) ? data : (data.chapters || data.data || []);
+        const list = $('#legadoChList'); list.innerHTML=''; SELECTED = new Set();
+        CHAPTERS.forEach((c,i)=>{
+          const name = c.name || c.title || ('第'+i+'章');
+          const div = document.createElement('div'); div.className='ch';
+          const cb = document.createElement('input'); cb.type='checkbox'; cb.dataset.i=i;
+          cb.addEventListener('change', ()=>{ cb.checked?SELECTED.add(i):SELECTED.delete(i); });
+          const sp = document.createElement('span'); sp.textContent = (i+1)+'. '+name;
+          div.appendChild(cb); div.appendChild(sp); list.appendChild(div);
+        });
+        $('#legadoChCard').style.display='';
+        $('#legadoRunCard').style.display='';
+        setLegadoStatus('共 '+CHAPTERS.length+' 话。勾选要转换的（可全选/范围）。');
+      }catch(e){ setLegadoStatus('读取章节失败：'+e.message); }
+    }
+
+    // 从章节正文提取图片（保留完整 src：URL + ,{"headers":{...}} JSON 后缀，legado 解析 Referer 用）
+    function extractImages(text){
+      let html = text;
+      try{ const o = JSON.parse(text); if(o && typeof o.data==='string') html = o.data; }catch(_){}
+      html = html.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"')
+                 .replace(/&#39;/g,"'").replace(/&amp;/g,'&');
+      const imgs = [];
+      const re = /\ssrc\s*=\s*"([\s\S]*?)"\s*>/gi; let m;
+      while((m = re.exec(html))){
+        const full = m[1];
+        const comma = full.indexOf(',');
+        imgs.push({ url: comma>=0 ? full.slice(0,comma) : full, src: full });
+      }
+      return imgs;
+    }
+
+    function blobToJpeg(blob){
+      return new Promise((resolve,reject)=>{
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = ()=>{
+          const w = img.naturalWidth || 800, h = img.naturalHeight || 1200;
+          const c = document.createElement('canvas');
+          c.width = w; c.height = h;
+          const ctx = c.getContext('2d');
+          ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h);
+          ctx.drawImage(img,0,0);
+          URL.revokeObjectURL(url);
+          let variance = 999;
+          try{
+            const step = Math.max(1, Math.floor((w*h)/2000));
+            const data = ctx.getImageData(0,0,w,h).data;
+            let sum=0, n=0;
+            for(let i=0;i<data.length;i+=4*step){ sum+=(data[i]+data[i+1]+data[i+2])/3; n++; }
+            const mean=sum/n; let s=0;
+            for(let i=0;i<data.length;i+=4*step){ const v=(data[i]+data[i+1]+data[i+2])/3-mean; s+=v*v; }
+            variance=Math.sqrt(s/n);
+          }catch(_){}
+          resolve({ dataUrl:c.toDataURL('image/jpeg',0.92), w, h, variance, size: blob.size });
+        };
+        img.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error('图片解码失败')); };
+        img.src = url;
+      });
+    }
+
+    async function mapLimit(items, limit, fn){
+      const out = new Array(items.length);
+      let idx = 0;
+      async function worker(){
+        while(idx < items.length){ const i = idx++; out[i] = await fn(items[i], i); }
+      }
+      await Promise.all(Array.from({length:Math.min(limit,items.length)}, worker));
+      return out;
+    }
+
+    // /image 接口：url=bookUrl 查书+书源；path=完整 src（含 ,{headers} JSON）解析 Referer；width=解码宽度
+    // 下载失败 legado 不报错，返回 errorBitmap 占位图（HTTP 200），用字节/方差识别
+    async function downloadToJpeg(bookUrl, fullSrc){
+      const u = '/image?url='+encodeURIComponent(bookUrl)
+              +'&path='+encodeURIComponent(fullSrc)
+              +'&width=1440';
+      let res;
+      try{ res = await legadoApi(u); }
+      catch(e){ throw new Error('请求失败: '+e.message); }
+      if(!res.ok){
+        const t = await res.text().catch(()=> '(无正文)');
+        throw new Error('HTTP '+res.status+' ct='+(res.headers.get('content-type')||'?')+' body='+t.slice(0,100));
+      }
+      const ct = res.headers.get('content-type') || '';
+      const blob = await res.blob();
+      if(!/image|octet-stream|binary/.test(ct)){
+        const t = await blob.text().catch(()=> '');
+        throw new Error('非图片 ct='+ct+' body='+t.slice(0,100));
+      }
+      return await blobToJpeg(blob);
+    }
+
+    async function fetchItem(bookUrl, it){
+      let lastErr='';
+      for(let a=0; a<RETRIES; a++){
+        try{
+          const jpg = await downloadToJpeg(bookUrl, it.src);
+          const broken = jpg.size < PLACEHOLDER_BYTES || jpg.variance < VAR_THRESHOLD;
+          it.data = broken ? null : jpg;
+          it.broken = broken;
+          it.err  = broken ? '坏图/占位图' : '';
+          return;
+        }catch(e){
+          lastErr = e.message;
+          if(a < RETRIES-1) continue;
+        }
+      }
+      it.data=null; it.broken=true; it.err=lastErr;
+    }
+
+    async function runFetch(items, bookUrl, onOne){
+      await mapLimit(items, CONCURRENCY, async (it)=>{
+        await fetchItem(bookUrl, it);
+        onOne(it);
+      });
+    }
+
+    function safeName(s){ return (s||'').replace(/[\\/:*?"<>|]/g,'_').trim() || '未命名'; }
+    // 单章→漫画名_章节名；多选→漫画名_范围（连续 1-5 否则 1,3,5）
+    function makeFname(bookName, idxs){
+      const name = safeName(bookName);
+      const sorted = [...idxs].sort((a,b)=>a-b);
+      if(sorted.length === 1){
+        const ch = CHAPTERS[sorted[0]];
+        const chName = safeName(ch ? (ch.name||ch.title) : ('第'+(sorted[0]+1)+'话'));
+        return name + '_' + chName + '.pdf';
+      }
+      const disp = sorted.map(i=>i+1);
+      let range;
+      if(disp[disp.length-1] - disp[0] === disp.length-1) range = disp[0] + '-' + disp[disp.length-1];
+      else range = disp.join(',');
+      return name + '_' + range + '话.pdf';
+    }
+
+    // 生成：每选中的话 → 一个 PDF，存入文件库（不进 我的PDF库）
+    async function legadoBuild(){
+      const b = BOOKS[+$('#legadoBookSel').value];
+      if(!b){ setLegadoStatus('请先选择书籍。'); return; }
+      const bookUrl = b.bookUrl || b.url;
+      const bookName = (b.name || b.bookName || 'legado') + '';
+      const idxs = [...SELECTED].sort((x,y)=>x-y);
+      if(!idxs.length){ setLegadoStatus('请先勾选至少一话。'); return; }
+      $('#btnBuild').disabled = true; $('#btnReDL').style.display='none';
+      IMAGES = [];
+      try{
+        setLegadoStatus('收集章节图片列表…');
+        let total=0;
+        for(const ci of idxs){
+          const ch = CHAPTERS[ci];
+          setLegadoStatus('读取第 '+(ci+1)+' 话：'+(ch.name||ch.title||'')+' …');
+          let content;
+          try{
+            const r = await legadoApi('/getBookContent?url='+encodeURIComponent(bookUrl)+'&index='+ci);
+            content = await r.text();
+          }catch(e){ setLegadoStatus('第'+(ci+1)+'话正文失败：'+e.message+'（跳过）'); continue; }
+          const urls = extractImages(content);
+          if(!urls.length){ setLegadoStatus('第'+(ci+1)+'话无图片（可能是文字章，跳过）'); continue; }
+          for(const u of urls){
+            IMAGES.push({ ci, chName:(ch.name||ch.title||('第'+ci)), url:u.url, src:u.src,
+                          data:null, broken:false, err:'' });
+          }
+          total += urls.length;
+        }
+        if(!total){ setLegadoStatus('没有可生成的图片。'); $('#btnBuild').disabled=false; return; }
+
+        setLegadoStatus('开始取图，共 '+total+' 张（并发 '+CONCURRENCY+'）…');
+        let done=0, broken=0;
+        await runFetch(IMAGES, bookUrl, (it)=>{
+          done++; if(it.broken) broken++;
+          setLegadoProg(done/total);
+          if(it.broken) setLegadoStatus('取图中 '+done+'/'+total+' … 已发现坏图 '+broken+' 张');
+        });
+
+        // 逐话生成 PDF 并存入文件库
+        let okChapters=0;
+        for(const ci of idxs){
+          const pages = IMAGES.filter(it=>it.ci===ci && it.data).map(it=>it.data);
+          const chBroken = IMAGES.some(it=>it.ci===ci && it.broken);
+          if(!pages.length){ continue; }
+          const blob = buildPdfBlob(pages);
+          const name = makeFname(bookName, [ci]);
+          await dbPutFile({
+            id: 'f-' + Date.now() + '-' + ci, name, size: blob.size,
+            createdAt: new Date().toLocaleString('zh-CN'), blob, kind: 'legado',
+            chapter: ci, broken: chBroken, seq: ++fileSeq
+          });
+          okChapters++;
+        }
+        renderFiles();
+
+        if(!okChapters){
+          const lastErr = (IMAGES.find(i=>i.err && i.err!=='坏图/占位图')||{}).err || '占位图';
+          setLegadoStatus('全部图片取图失败/坏图。\n最后错误：'+lastErr+'\n把这段报错发我即可定位。');
+          $('#btnBuild').disabled=false; return;
+        }
+        setLegadoStatus('✅ 完成！已存入文件库 '+okChapters+' 个 PDF（每话一个）'
+          + (broken ? '，坏图 '+broken+' 张（点下面按钮可只重下坏图）' : '')
+          + '。\n到下方「📁 文件库」可多选合并 / 下载。');
+        if(broken){
+          $('#btnReDL').style.display='';
+          $('#btnReDL').textContent='🔄 重新下载坏图 ('+broken+')';
+        }
+      }catch(e){ setLegadoStatus('生成出错：'+e.message); }
+      finally{ $('#btnBuild').disabled = false; }
+    }
+
+    // 只重下坏图：再请求一次（legado 有缓存，常在第二次成功），重建受影响的话并覆盖文件库记录
+    async function legadoReDownload(){
+      const bad = IMAGES.filter(it=>it.broken);
+      if(!bad.length){ setLegadoStatus('当前没有坏图。'); return; }
+      $('#btnReDL').disabled = true; $('#btnBuild').disabled = true;
+      const b = BOOKS[+$('#legadoBookSel').value];
+      const bookUrl = b.bookUrl || b.url;
+      const bookName = (b.name || b.bookName || 'legado') + '';
+      try{
+        setLegadoStatus('重新下载坏图，共 '+bad.length+' 张…');
+        let done=0, still=0;
+        await runFetch(bad, bookUrl, (it)=>{
+          done++; if(it.broken) still++;
+          setLegadoProg(done/bad.length);
+        });
+        const affected = [...new Set(bad.map(it=>it.ci))];
+        const files = await dbAllFiles();
+        for(const ci of affected){
+          const rec = files.find(f=>f.kind==='legado' && f.chapter===ci);
+          if(!rec) continue;
+          const pages = IMAGES.filter(it=>it.ci===ci && it.data).map(it=>it.data);
+          const chBroken = IMAGES.some(it=>it.ci===ci && it.broken);
+          const blob = buildPdfBlob(pages);
+          await dbPutFile({ ...rec, blob, size: blob.size, broken: chBroken });
+        }
+        renderFiles();
+        if(still){
+          setLegadoStatus('重下完成，仍有 '+still+' 张坏图（图源/网络不稳，可再点一次重下）。\n已更新文件库记录。');
+          $('#btnReDL').textContent='🔄 再试下载坏图 ('+still+')';
+        }else{
+          setLegadoStatus('🎉 全部坏图已补回！已更新文件库记录。');
+          $('#btnReDL').style.display='none';
+        }
+      }catch(e){ setLegadoStatus('重下出错：'+e.message); }
+      finally{ $('#btnReDL').disabled=false; $('#btnBuild').disabled=false; }
+    }
+
+    // ================= Legado 事件绑定 =================
+    function bindLegado(){
+      $('#btnLegadoToggle').addEventListener('click', ()=>{
+        const p = $('#legadoPanel');
+        p.style.display = p.style.display === 'none' ? 'block' : 'none';
+      });
+      $('#btnShelf').addEventListener('click', loadShelf);
+      $('#btnChapters').addEventListener('click', loadChapters);
+      $('#btnAll').addEventListener('click', ()=>{
+        document.querySelectorAll('#legadoChList input').forEach(cb=>{cb.checked=true; SELECTED.add(+cb.dataset.i);});
+      });
+      $('#btnNone').addEventListener('click', ()=>{
+        document.querySelectorAll('#legadoChList input').forEach(cb=>{cb.checked=false;});
+        SELECTED.clear();
+      });
+      $('#btnRange').addEventListener('click', ()=>{
+        const a=parseInt($('#rangeFrom').value,10), b=parseInt($('#rangeTo').value,10);
+        if(isNaN(a)||isNaN(b)){ setLegadoStatus('范围请输入数字'); return; }
+        const lo=Math.min(a,b)-1, hi=Math.max(a,b)-1;
+        document.querySelectorAll('#legadoChList input').forEach(cb=>{
+          const i=+cb.dataset.i;
+          if(i>=lo && i<=hi){ cb.checked=true; SELECTED.add(i); } else { cb.checked=false; SELECTED.delete(i); }
+        });
+        setLegadoStatus('已选第 '+Math.min(a,b)+'~'+Math.max(a,b)+' 话。');
+      });
+      $('#btnBuild').addEventListener('click', legadoBuild);
+      $('#btnReDL').addEventListener('click', legadoReDownload);
     }
 
     // ================= 初始化 =================
     (async () => {
       await ensureLibs();
-      checkLibs();
-      // 清理旧版本遗留的 Kindle 邮箱设置
+      checkLibs();   // 仅检查首页必需库，缺则提示；pdf-lib 留到合并时检查
       try { localStorage.removeItem('zip2pdf.kindleEmail'); } catch (e) {}
       try {
         db = await openDB();
         bindBulk();
+        bindLegado();
         renderUploads();
+        renderFiles();
         renderLibrary();
       } catch (e) {
-        // file:// 直接打开、或隐私模式下 IndexedDB 可能不可用
         const tip = '<div class="empty">⚠️ 本地存储不可用（请用 http/https 网址访问，不要直接双击打开文件）</div>';
         document.getElementById('uploads').innerHTML = tip;
+        document.getElementById('files').innerHTML = tip;
         document.getElementById('library').innerHTML = tip;
       }
       if ('serviceWorker' in navigator) {
