@@ -13,15 +13,23 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, "PingFang SC", sans-serif;
-      background: #f3f4f6; padding: 24px 16px; }
+      background: #f3f4f6; padding: 24px 16px; overflow-x: hidden; }
     h1 { text-align: center; color: #1f2937; margin-bottom: 4px; font-size: 22px; }
     p.tip { text-align: center; color: #6b7280; font-size: 13px; margin-bottom: 20px; }
     .card { background: #fff; border-radius: 16px; padding: 24px;
       max-width: 480px; margin: 0 auto 20px; box-shadow: 0 4px 12px rgba(0,0,0,.08); }
     #fileInput, #imgInput { display: none; }
     .btn { display: inline-block; background: #4f46e5; color: #fff; border: none;
-      border-radius: 12px; padding: 12px 22px; font-size: 15px; cursor: pointer;
+      border-radius: 8px; padding: 12px 22px; font-size: 15px; cursor: pointer;
       white-space: nowrap; }
+    /* 表单控件继承正文字体（标题字体），并与按钮同高、不超出模块 */
+    button, input, select, textarea { font-family: inherit; max-width: 100%; }
+    #legadoPanel input[type=text], #legadoPanel input[type=number], #legadoPanel select {
+      width: 100%; max-width: 100%; padding: 11px 12px; font-size: 15px;
+      border: 1px solid #d1d5db; border-radius: 8px; background: #fff; color: #1f2937;
+    }
+    #legadoPanel .row > input { flex: 1 1 0; min-width: 0; }
+    #legadoPanel label { display: block; font-size: 14px; color: #374151; margin-bottom: 6px; }
     .btn:disabled { background: #9ca3af; cursor: not-allowed; }
     .btn.small { padding: 7px 12px; font-size: 13px; border-radius: 8px; }
     .btn.danger { background: #dc2626; }
@@ -42,9 +50,10 @@
     .item .ops { display: flex; gap: 8px; flex-wrap: wrap; }
     .mask { position: fixed; inset: 0; background: rgba(17,24,39,.5);
       display: none; align-items: center; justify-content: center; padding: 20px; z-index: 50; }
-    .dialog { background: #fff; border-radius: 16px; padding: 22px; width: 100%; max-width: 360px; }
-    .dialog h3 { font-size: 17px; color: #1f2937; margin-bottom: 10px; }
-    .dialog p { font-size: 13px; color: #6b7280; line-height: 1.7; }
+    .dialog { background: #fff; border-radius: 16px; padding: 22px; width: 100%;
+      max-width: min(360px, calc(100vw - 40px)); overflow-wrap: anywhere; }
+    .dialog h3 { font-size: 17px; color: #1f2937; margin-bottom: 10px; overflow-wrap: anywhere; }
+    .dialog p { font-size: 13px; color: #6b7280; line-height: 1.7; overflow-wrap: anywhere; word-break: break-word; }
     .dialog-ops { display: flex; gap: 10px; margin-top: 18px; }
     .dialog-ops .btn { flex: 1; text-align: center; }
     .empty { color: #9ca3af; font-size: 14px; text-align: center; padding: 16px 0; }
@@ -109,66 +118,56 @@
       <div id="progressText"></div>
     </div>
     <div id="status"></div>
-    <div class="hint">单个 ZIP / 一次选择的图片合计不超过 500&nbsp;MB</div>
   </div>
 
-  <!-- ============ Legado 直连面板（默认隐藏） ============ -->
+  <!-- ============ Legado 直连面板（默认隐藏，四区合一卡） ============ -->
   <div id="legadoPanel" style="display:none">
     <div class="card">
       <h2>📚 Legado 在线漫画</h2>
+
       <label>Legado Web 服务地址</label>
       <div class="row" style="margin-bottom:8px">
         <input type="text" id="legadoBase" value="http://127.0.0.1:1122" placeholder="http://127.0.0.1:1122 或 手机局域网IP:1122">
-        <button class="btn small gray" id="btnShelf" style="flex:0 0 auto">读取书架</button>
+        <button class="btn gray" id="btnShelf" style="flex:0 0 auto">读取书架</button>
       </div>
       <div class="legado-hint">需 Chrome/Edge（对 127.0.0.1 豁免 CORS）。Firefox 可能需同源。页面 https 打开时，127.0.0.1 混合内容 Chrome 通常也豁免。legado 设置 → 其他 → Web 服务，端口 1122 保持运行。</div>
-    </div>
 
-    <div class="card" id="legadoBookCard" style="display:none">
-      <label>选择书籍</label>
-      <select id="legadoBookSel"></select>
-      <div class="row" style="margin-top:10px">
-        <button class="btn small gray" id="btnChapters">读取章节</button>
+      <div id="legadoBookCard" style="display:none; margin-top:16px; padding-top:14px; border-top:1px solid #e5e7eb">
+        <label>选择书籍</label>
+        <select id="legadoBookSel"></select>
+        <div class="row" style="margin-top:10px">
+          <button class="btn gray" id="btnChapters">读取章节</button>
+        </div>
       </div>
-    </div>
 
-    <div class="card" id="legadoChCard" style="display:none">
-      <label>选择要转换的章节（不勾=不下载，可只转部分）</label>
-      <div class="row" style="margin-bottom:8px">
-        <button class="btn small gray" id="btnAll">全选</button>
-        <button class="btn small gray" id="btnNone">全不选</button>
+      <div id="legadoChCard" style="display:none; margin-top:16px; padding-top:14px; border-top:1px solid #e5e7eb">
+        <label>选择要转换的章节</label>
+        <div class="row" style="margin-bottom:8px">
+          <button class="btn gray" id="btnAll">全选</button>
+          <button class="btn gray" id="btnNone">全不选</button>
+        </div>
+        <div class="row" style="margin-bottom:8px">
+          <input type="text" id="rangeFrom" placeholder="起">
+          <input type="text" id="rangeTo" placeholder="止">
+          <button class="btn gray" id="btnRange" style="flex:0 0 auto">选范围</button>
+        </div>
+        <div class="row" style="margin-bottom:8px">
+          <input type="number" id="concInput" value="8" min="1" max="32" style="flex:0 0 96px">
+          <span style="font-size:12px;color:#9ca3af;flex:1;line-height:1.5">并发线数：高→下载快，但易触发图源限流、坏图变多；低→更稳，但更慢。建议 4~8。</span>
+        </div>
+        <div id="legadoChList" style="max-height:42vh; overflow:auto"></div>
       </div>
-      <div class="row" style="margin-bottom:8px">
-        <input type="text" id="rangeFrom" placeholder="起">
-        <input type="text" id="rangeTo" placeholder="止">
-        <button class="btn small gray" id="btnRange">选范围</button>
-      </div>
-      <div id="legadoChList" style="max-height:42vh; overflow:auto"></div>
-    </div>
 
-    <div class="card" id="legadoRunCard" style="display:none">
-      <div class="row" style="margin-bottom:8px">
-        <button class="btn" id="btnBuild" style="flex:1 1 0">🚀 生成 PDF（每话一个）</button>
-      </div>
-      <button class="btn gray" id="btnReDL" style="display:none; width:100%; margin-bottom:8px">🔄 重新下载坏图</button>
-      <div class="bar-wrap" id="legadoBarWrap" style="display:block">
-        <div class="bar"><div class="bar-fill" id="legadoBarFill"></div></div>
-        <div id="legadoProgressText"></div>
-      </div>
-      <div id="legadoStatus">就绪。</div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>📤 上传记录</h2>
-    <div id="uploads"></div>
-    <div class="bulk" id="upBulk">
-      <div class="bulk-top">
-        <button class="btn small gray" id="upAll">全选</button>
-        <span class="selcount" id="upCount">已选 0 条</span>
-      </div>
-      <div class="bulk-ops">
-        <button class="btn small danger" id="upDelete">删除记录</button>
+      <div id="legadoRunCard" style="display:none; margin-top:16px; padding-top:14px; border-top:1px solid #e5e7eb">
+        <div class="row" style="margin-bottom:8px">
+          <button class="btn" id="btnBuild" style="flex:1 1 0">🚀 生成 PDF（每话一个）</button>
+        </div>
+        <button class="btn gray" id="btnReDL" style="display:none; width:100%; margin-bottom:8px">🔄 重新下载坏图</button>
+        <div class="bar-wrap" id="legadoBarWrap" style="display:block">
+          <div class="bar"><div class="bar-fill" id="legadoBarFill"></div></div>
+          <div id="legadoProgressText"></div>
+        </div>
+        <div id="legadoStatus">就绪。</div>
       </div>
     </div>
   </div>
@@ -186,6 +185,20 @@
         <button class="btn small gray" id="fileDownload">下载</button>
         <button class="btn small gray" id="fileRename">重命名</button>
         <button class="btn small danger" id="fileDelete">删除</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>📤 上传记录</h2>
+    <div id="uploads"></div>
+    <div class="bulk" id="upBulk">
+      <div class="bulk-top">
+        <button class="btn small gray" id="upAll">全选</button>
+        <span class="selcount" id="upCount">已选 0 条</span>
+      </div>
+      <div class="bulk-ops">
+        <button class="btn small danger" id="upDelete">删除记录</button>
       </div>
     </div>
   </div>
@@ -428,11 +441,6 @@
       return doc.output('blob');
     }
 
-    const MAX_BYTES = 500 * 1024 * 1024;
-    const MAX_LABEL = '500 MB';
-    const BIG_PDF_BYTES = 200 * 1024 * 1024;
-    const BIG_PDF_LABEL = '200 MB';
-
     function fmtSize(bytes) {
       if (bytes >= 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
       return Math.max(1, Math.round(bytes / 1024)) + ' KB';
@@ -477,15 +485,6 @@
       if (missing.length) { reportLibMissing(missing); return; }
 
       const status = document.getElementById('status');
-      if (file.size > MAX_BYTES) {
-        hideProgress();
-        status.innerHTML = '<span style="color:#dc2626">⚠️ 文件 ' + fmtSize(file.size) +
-          ' 超过 ' + MAX_LABEL + ' 上限，请拆分压缩包后再上传</span>';
-        await addUpload({ name: file.name, size: file.size, kind: 'zip',
-          note: '超过 ' + MAX_LABEL + ' 上限，未转换', ok: false });
-        return;
-      }
-
       const merge = document.getElementById('mergeChk').checked;
       setProgress(0, '读取文件中…（' + fmtSize(file.size) + '）');
       status.textContent = '';
@@ -561,16 +560,6 @@
       const missing = checkLibs();
       if (missing.length) { reportLibMissing(missing); return; }
       const status = document.getElementById('status');
-
-      const totalBytes = files.reduce((s, f) => s + f.size, 0);
-      if (totalBytes > MAX_BYTES) {
-        hideProgress();
-        status.innerHTML = '<span style="color:#dc2626">⚠️ 所选图片合计 ' + fmtSize(totalBytes) +
-          ' 超过 ' + MAX_LABEL + ' 上限，请少选一些</span>';
-        await addUpload({ name: files.length + ' 张图片', size: totalBytes, kind: 'images',
-          detail: files.length + ' 张', note: '超过 ' + MAX_LABEL + ' 上限，未转换', ok: false });
-        return;
-      }
 
       setProgress(0, '准备中…（' + files.length + ' 张，' + fmtSize(totalBytes) + '）');
       status.textContent = '';
@@ -706,10 +695,6 @@
         const div = document.createElement('div');
         const on = selPdfs.has(rec.id);
         div.className = 'item' + (on ? ' sel' : '');
-        const bigWarn = rec.size > BIG_PDF_BYTES
-          ? '<div class="meta" style="color:#dc2626">⚠️ 超过 ' + BIG_PDF_LABEL +
-            '：多数邮箱附件和在线上传都有此限制，建议拆成多个 PDF</div>'
-          : '';
         div.innerHTML =
           '<div class="pickrow">' +
             '<input type="checkbox"' + (on ? ' checked' : '') + '>' +
@@ -717,8 +702,7 @@
           '</div>' +
           '<div class="meta">' + rec.createdAt + ' · ' +
             (rec.size / 1024 / 1024).toFixed(2) + ' MB' +
-            ' · ' + (rec.sent ? '✅ 已分享' : '⬜ 未分享') + '</div>' +
-          bigWarn;
+            ' · ' + (rec.sent ? '✅ 已分享' : '⬜ 未分享') + '</div>';
         div.onclick = () => {
           selPdfs.has(rec.id) ? selPdfs.delete(rec.id) : selPdfs.add(rec.id);
           renderLibrary();
@@ -935,8 +919,8 @@
     }
 
     // ================= 合并多个 PDF（pdf-lib）=================
+    // 合并结果存入「我的 PDF 库」，可直接 LocalSend 分享；命名与下载时一致（漫画名_范围话.pdf）
     async function mergeFiles(recs) {
-      const status = document.getElementById('legadoStatus');
       await ensureLibs();
       if (typeof PDFLib === 'undefined') {
         setLegadoStatus('⚠️ 合并所需 pdf-lib 未加载，请确认 vendor/pdf-lib.min.js 已上传。');
@@ -953,14 +937,20 @@
         }
         const out = await merged.save();
         const blob = new Blob([out], { type: 'application/pdf' });
-        const name = '合并_' + recs.length + '个.pdf';
-        await dbPutFile({
-          id: 'f-' + Date.now(), name, size: blob.size,
-          createdAt: new Date().toLocaleString('zh-CN'), blob, kind: 'legado',
-          chapter: null, broken: false, seq: ++fileSeq
+        // 命名：同一本书且都有话号 → 漫画名_范围话.pdf（与下载命名一致）；否则兜底
+        const bookNames = [...new Set(recs.map(r => r.bookName).filter(Boolean))];
+        const chaps = recs.map(r => r.chapter);
+        let name = '合并_' + recs.length + '个.pdf';
+        if (bookNames.length === 1 && chaps.every(c => typeof c === 'number' && c >= 0)) {
+          name = safeName(bookNames[0]) + '_' + rangeLabel(chaps) + '话.pdf';
+        }
+        await dbPut({
+          id: 'p-' + Date.now(), name, size: blob.size,
+          createdAt: new Date().toLocaleString('zh-CN'), sent: false, blob
         });
-        renderFiles();
-        setLegadoStatus('✅ 已合并为 1 个 PDF：' + name + '（已存入文件库，可下载）');
+        renderLibrary();
+        document.getElementById('status').textContent =
+          '✅ 已合并为 1 个 PDF：' + name + '（已存入「我的 PDF 库」，可打开 LocalSend 分享）';
       } catch (e) {
         setLegadoStatus('合并失败：' + e.message);
       }
@@ -1130,14 +1120,20 @@
       it.data=null; it.broken=true; it.err=lastErr;
     }
 
-    async function runFetch(items, bookUrl, onOne){
-      await mapLimit(items, CONCURRENCY, async (it)=>{
+    async function runFetch(items, bookUrl, onOne, limit){
+      await mapLimit(items, limit || CONCURRENCY, async (it)=>{
         await fetchItem(bookUrl, it);
         onOne(it);
       });
     }
 
     function safeName(s){ return (s||'').replace(/[\\/:*?"<>|]/g,'_').trim() || '未命名'; }
+    // 多话范围显示：连续→ 1-5，跳选→ 1,3,5
+    function rangeLabel(idxs){
+      const disp = [...idxs].sort((a,b)=>a-b).map(i=>i+1);
+      if(disp[disp.length-1] - disp[0] === disp.length-1) return disp[0] + '-' + disp[disp.length-1];
+      return disp.join(',');
+    }
     // 单章→漫画名_章节名；多选→漫画名_范围（连续 1-5 否则 1,3,5）
     function makeFname(bookName, idxs){
       const name = safeName(bookName);
@@ -1147,11 +1143,7 @@
         const chName = safeName(ch ? (ch.name||ch.title) : ('第'+(sorted[0]+1)+'话'));
         return name + '_' + chName + '.pdf';
       }
-      const disp = sorted.map(i=>i+1);
-      let range;
-      if(disp[disp.length-1] - disp[0] === disp.length-1) range = disp[0] + '-' + disp[disp.length-1];
-      else range = disp.join(',');
-      return name + '_' + range + '话.pdf';
+      return name + '_' + rangeLabel(sorted) + '话.pdf';
     }
 
     // 生成：每选中的话 → 一个 PDF，存入文件库（不进 我的PDF库）
@@ -1162,8 +1154,13 @@
       const bookName = (b.name || b.bookName || 'legado') + '';
       const idxs = [...SELECTED].sort((x,y)=>x-y);
       if(!idxs.length){ setLegadoStatus('请先勾选至少一话。'); return; }
+      // 并发线数从输入框读取（1~32），默认 8
+      const CONC = Math.max(1, Math.min(32, parseInt($('#concInput') && $('#concInput').value, 10) || CONCURRENCY));
       $('#btnBuild').disabled = true; $('#btnReDL').style.display='none';
       IMAGES = [];
+      // 进度条恢复开始状态
+      setLegadoProg(0, '');
+      document.getElementById('legadoProgressText').textContent = '准备中…';
       try{
         setLegadoStatus('收集章节图片列表…');
         let total=0;
@@ -1185,13 +1182,13 @@
         }
         if(!total){ setLegadoStatus('没有可生成的图片。'); $('#btnBuild').disabled=false; return; }
 
-        setLegadoStatus('开始取图，共 '+total+' 张（并发 '+CONCURRENCY+'）…');
+        setLegadoStatus('开始取图，共 '+total+' 张（并发 '+CONC+'）…');
         let done=0, broken=0;
         await runFetch(IMAGES, bookUrl, (it)=>{
           done++; if(it.broken) broken++;
           setLegadoProg(done/total);
           if(it.broken) setLegadoStatus('取图中 '+done+'/'+total+' … 已发现坏图 '+broken+' 张');
-        });
+        }, CONC);
 
         // 逐话生成 PDF 并存入文件库
         let okChapters=0;
@@ -1204,7 +1201,7 @@
           await dbPutFile({
             id: 'f-' + Date.now() + '-' + ci, name, size: blob.size,
             createdAt: new Date().toLocaleString('zh-CN'), blob, kind: 'legado',
-            chapter: ci, broken: chBroken, seq: ++fileSeq
+            bookName, chapter: ci, broken: chBroken, seq: ++fileSeq
           });
           okChapters++;
         }
