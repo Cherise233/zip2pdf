@@ -20,7 +20,7 @@
       max-width: 480px; margin: 0 auto 20px; box-shadow: 0 4px 12px rgba(0,0,0,.08); }
     #fileInput, #imgInput { display: none; }
     .btn { display: inline-block; background: #4f46e5; color: #fff; border: none;
-      border-radius: 8px; padding: 12px 22px; font-size: 15px; cursor: pointer;
+      border-radius: 12px; padding: 12px 18px; font-size: 15px; cursor: pointer;
       white-space: nowrap; }
     /* 表单控件继承正文字体（标题字体），并与按钮同高、不超出模块 */
     button, input, select, textarea { font-family: inherit; max-width: 100%; }
@@ -32,6 +32,8 @@
     #legadoPanel label { display: block; font-size: 14px; color: #374151; margin-bottom: 6px; }
     .btn:disabled { background: #9ca3af; cursor: not-allowed; }
     .btn.small { padding: 7px 12px; font-size: 13px; border-radius: 8px; }
+    /* Legado 面板按钮高度与「文件库·合并」按钮(.bulk-ops .btn.small 9px 纵向)保持一致 */
+    #legadoPanel .btn.small { padding: 9px 12px; }
     .btn.danger { background: #dc2626; }
     .btn.gray { background: #6b7280; }
     #status { margin-top: 14px; color: #374151; font-size: 14px; min-height: 20px; }
@@ -128,7 +130,7 @@
       <label>Legado Web 服务地址</label>
       <div class="row" style="margin-bottom:8px">
         <input type="text" id="legadoBase" value="http://127.0.0.1:1122" placeholder="http://127.0.0.1:1122 或 手机局域网IP:1122">
-        <button class="btn gray" id="btnShelf" style="flex:0 0 auto">读取书架</button>
+        <button class="btn small gray" id="btnShelf" style="flex:0 0 auto; padding:9px 10px">读取书架</button>
       </div>
       <div class="legado-hint">需 Chrome/Edge（对 127.0.0.1 豁免 CORS）。Firefox 可能需同源。页面 https 打开时，127.0.0.1 混合内容 Chrome 通常也豁免。legado 设置 → 其他 → Web 服务，端口 1122 保持运行。</div>
 
@@ -136,20 +138,20 @@
         <label>选择书籍</label>
         <select id="legadoBookSel"></select>
         <div class="row" style="margin-top:10px">
-          <button class="btn gray" id="btnChapters">读取章节</button>
+          <button class="btn small gray" id="btnChapters">读取章节</button>
         </div>
       </div>
 
       <div id="legadoChCard" style="display:none; margin-top:16px; padding-top:14px; border-top:1px solid #e5e7eb">
         <label>选择要转换的章节</label>
         <div class="row" style="margin-bottom:8px">
-          <button class="btn gray" id="btnAll">全选</button>
-          <button class="btn gray" id="btnNone">全不选</button>
+          <button class="btn small gray" id="btnAll">全选</button>
+          <button class="btn small gray" id="btnNone">全不选</button>
         </div>
         <div class="row" style="margin-bottom:8px">
           <input type="text" id="rangeFrom" placeholder="起">
           <input type="text" id="rangeTo" placeholder="止">
-          <button class="btn gray" id="btnRange" style="flex:0 0 auto">选范围</button>
+          <button class="btn small gray" id="btnRange" style="flex:0 0 auto">选范围</button>
         </div>
         <div class="row" style="margin-bottom:8px">
           <input type="number" id="concInput" value="8" min="1" max="32" style="flex:0 0 96px">
@@ -160,9 +162,9 @@
 
       <div id="legadoRunCard" style="display:none; margin-top:16px; padding-top:14px; border-top:1px solid #e5e7eb">
         <div class="row" style="margin-bottom:8px">
-          <button class="btn" id="btnBuild" style="flex:1 1 0">🚀 生成 PDF（每话一个）</button>
+          <button class="btn small" id="btnBuild" style="flex:1 1 0">🚀 生成 PDF（每话一个）</button>
         </div>
-        <button class="btn gray" id="btnReDL" style="display:none; width:100%; margin-bottom:8px">🔄 重新下载坏图</button>
+        <button class="btn small gray" id="btnReDL" style="display:none; width:100%; margin-bottom:8px">🔄 重新下载坏图</button>
         <div class="bar-wrap" id="legadoBarWrap" style="display:block">
           <div class="bar"><div class="bar-fill" id="legadoBarFill"></div></div>
           <div id="legadoProgressText"></div>
@@ -893,7 +895,19 @@
       };
       document.getElementById('fileMerge').onclick = async () => {
         const recs = await selectedFiles();
-        if (recs.length < 2) { setLegadoStatus('合并至少需要选择 2 个文件。'); return; }
+        if (!recs.length) { setLegadoStatus('请先选择至少 1 个文件。'); return; }
+        // 仅选 1 个：直接原样存入「我的 PDF 库」，不改名、不重处理
+        if (recs.length === 1) {
+          const r = recs[0];
+          await dbPut({
+            id: 'p-' + Date.now(), name: r.name, size: r.size,
+            createdAt: new Date().toLocaleString('zh-CN'), sent: false, blob: r.blob
+          });
+          renderLibrary();
+          document.getElementById('status').textContent =
+            '✅ 已将「' + r.name + '」存入「我的 PDF 库」（未改名，可直接打开 LocalSend 分享）';
+          return;
+        }
         await mergeFiles(recs);
       };
       document.getElementById('fileDownload').onclick = async () => {
