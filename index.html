@@ -22,10 +22,13 @@
     .btn { display: inline-block; background: #4f46e5; color: #fff; border: none;
       border-radius: 12px; padding: 12px 18px; font-size: 15px; cursor: pointer;
       white-space: nowrap; }
+    /* 顶部三个主按钮（ZIP/图片/Legado）：被 flex 均分宽度，缩小字号与横向内边距防止文字溢出按钮 */
+    .row > .btn.main-tab { font-size: 13px; padding: 12px 4px; }
+    @media (max-width: 380px) { .row > .btn.main-tab { font-size: 12px; } }
     /* 表单控件继承正文字体（标题字体），并与按钮同高、不超出模块 */
     button, input, select, textarea { font-family: inherit; max-width: 100%; }
     #legadoPanel input[type=text], #legadoPanel input[type=number], #legadoPanel select {
-      width: 100%; max-width: 100%; padding: 11px 12px; font-size: 15px;
+      width: 100%; max-width: 100%; padding: 8px 12px; font-size: 13px;
       border: 1px solid #d1d5db; border-radius: 8px; background: #fff; color: #1f2937;
     }
     #legadoPanel .row > input { flex: 1 1 0; min-width: 0; }
@@ -102,9 +105,9 @@
     <input type="file" id="fileInput" accept=".zip,application/zip,application/x-zip-compressed">
     <input type="file" id="imgInput" accept="image/*" multiple>
     <div class="row" style="margin-bottom:14px">
-      <button class="btn" onclick="document.getElementById('fileInput').click()">📦 ZIP 文件</button>
-      <button class="btn gray" onclick="document.getElementById('imgInput').click()">🖼️ 图片文件</button>
-      <button class="btn gray" id="btnLegadoToggle">📚 Legado</button>
+      <button class="btn main-tab" onclick="document.getElementById('fileInput').click()">📦 ZIP 文件</button>
+      <button class="btn main-tab" onclick="document.getElementById('imgInput').click()">🖼️ 图片文件</button>
+      <button class="btn main-tab" id="btnLegadoToggle">📚 Legado</button>
     </div>
     <div class="opt">
       <input type="checkbox" id="mergeChk" checked>
