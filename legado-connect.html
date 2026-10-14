@@ -7,35 +7,42 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  body { margin:0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-         background:#0f1115; color:#e6e6e6; padding:14px; padding-bottom:120px; }
-  h1 { font-size:18px; margin:4px 0 12px; }
-  .card { background:#1a1d24; border:1px solid #2a2f3a; border-radius:12px; padding:14px; margin-bottom:12px; }
-  label { display:block; font-size:13px; color:#9aa3b2; margin-bottom:6px; }
-  input[type=text], select { width:100%; padding:10px; border-radius:8px; border:1px solid #2a2f3a;
-         background:#0f1115; color:#e6e6e6; font-size:14px; }
-  button { padding:10px 14px; border:none; border-radius:8px; background:#3b82f6; color:#fff;
-           font-size:14px; font-weight:600; cursor:pointer; }
-  button.ghost { background:#2a2f3a; color:#cfd6e2; }
-  button:disabled { opacity:.45; cursor:not-allowed; }
+  body { margin:0; font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+         background:#f3f4f6; color:#1f2937; line-height:1.6; padding:16px; padding-bottom:120px; }
+  .card { background:#fff; border-radius:16px; padding:18px; margin:0 auto 16px; max-width:720px;
+          box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  h1 { font-size:19px; margin:0 0 4px; }
+  .sub { font-size:13px; color:#6b7280; margin-bottom:14px; }
+  label { display:block; font-size:13px; color:#6b7280; margin-bottom:6px; }
+  input[type=text], select { width:100%; padding:10px; border-radius:10px; border:1px solid #e5e7eb;
+         background:#fff; color:#1f2937; font-size:14px; }
+  button { padding:11px 16px; border:none; border-radius:10px; background:#4f46e5; color:#fff;
+           font-size:15px; cursor:pointer; }
+  button.ghost { background:#e5e7eb; color:#374151; }
+  button:disabled { background:#d1d5db; color:#9ca3af; cursor:not-allowed; }
+  button.small { padding:8px 12px; font-size:14px; }
   .row { display:flex; gap:8px; flex-wrap:wrap; }
   .row > * { flex:1 1 auto; }
-  .book { padding:10px; border:1px solid #2a2f3a; border-radius:8px; background:#0f1115; margin-bottom:6px; }
-  .book b { color:#fff; }
-  .meta { font-size:12px; color:#7e879a; margin-top:2px; word-break:break-all; }
-  .ch { display:flex; align-items:center; gap:8px; padding:7px 9px; border-radius:7px; background:#0f1115; margin-bottom:4px; }
+  .book { padding:10px; border:1px solid #e5e7eb; border-radius:10px; background:#f9fafb; margin-bottom:6px; }
+  .book b { color:#1f2937; }
+  .meta { font-size:12px; color:#9ca3af; margin-top:2px; word-break:break-all; }
+  .ch { display:flex; align-items:center; gap:8px; padding:7px 9px; border-radius:8px; background:#f9fafb;
+        border:1px solid #e5e7eb; margin-bottom:4px; }
   .ch input { width:18px; height:18px; }
   .ch span { font-size:13px; flex:1; }
-  .bar { height:10px; background:#2a2f3a; border-radius:6px; overflow:hidden; margin-top:8px; }
-  .bar > i { display:block; height:100%; width:0; background:#3b82f6; transition:width .2s; }
-  .status { font-size:13px; color:#9aa3b2; margin-top:8px; line-height:1.5; white-space:pre-wrap; }
-  .tag { display:inline-block; font-size:11px; padding:2px 7px; border-radius:20px; background:#1e3a5f; color:#7cc0ff; margin-left:6px; }
-  .warn { font-size:12px; color:#ffb454; margin-top:6px; }
+  .bar { height:10px; background:#e5e7eb; border-radius:999px; overflow:hidden; margin-top:8px; }
+  .bar > i { display:block; height:100%; width:0; background:linear-gradient(90deg,#818cf8,#4f46e5); transition:width .2s; }
+  .status { font-size:14px; color:#374151; margin-top:8px; line-height:1.5; white-space:pre-wrap; }
+  .tag { display:inline-block; font-size:11px; padding:2px 7px; border-radius:20px; background:#e0e7ff; color:#4f46e5; margin-left:6px; }
+  .warn { font-size:12px; color:#b45309; margin-top:6px; }
   #fab { position:fixed; left:14px; right:14px; bottom:14px; padding:14px; font-size:16px; border-radius:12px; }
 </style>
 </head>
 <body>
-<h1>📚 Legado 直连转 PDF</h1>
+<div class="card">
+  <h1>📚 Legado 直连转 PDF</h1>
+  <div class="sub">手机直连 legado Web 服务（默认 127.0.0.1:1122），按需选章、自动防缺图，转成 PDF</div>
+</div>
 
 <div class="card">
   <label>Legado Web 服务地址</label>
@@ -70,6 +77,7 @@
   <div class="row">
     <button id="btnBuild">🚀 生成 PDF</button>
   </div>
+  <button id="btnReDL" class="ghost" style="display:none; width:100%; margin-top:8px">🔄 重新下载坏图</button>
   <div class="bar"><i id="prog"></i></div>
   <div class="status" id="status">就绪。</div>
 </div>
@@ -78,7 +86,11 @@
 
 <script>
 const $ = s => document.querySelector(s);
-let BOOKS = [], CHAPTERS = [], SELECTED = new Set(), builtDoc = null;
+let BOOKS = [], CHAPTERS = [], SELECTED = new Set(), builtDoc = null, IMAGES = [];
+const CONCURRENCY = 8;       // 并发取图路数（本地 legado，拉到 8 提速）
+const RETRIES    = 2;        // 网络错误重试次数（占位图不重试，避免浪费）
+const PLACEHOLDER_BYTES = 50000; // 占位图/半截图字节阈值（漫画页 1440px 通常 >100KB）
+const VAR_THRESHOLD = 4;     // 像素方差阈值：近乎纯色=占位图
 
 async function api(path){
   const base = $('#base').value.trim().replace(/\/+$/,'');
@@ -153,19 +165,30 @@ function extractImages(text){
   return imgs;
 }
 
-// blob -> JPEG dataURL（canvas 不污染，因为 blob 同源）
+// blob -> JPEG dataURL + 尺寸 + 亮度方差（方差用于识别“近乎纯色的占位图”）
 function blobToJpeg(blob){
   return new Promise((resolve,reject)=>{
     const url = URL.createObjectURL(blob);
     const img = new Image();
     img.onload = ()=>{
+      const w = img.naturalWidth || 800, h = img.naturalHeight || 1200;
       const c = document.createElement('canvas');
-      c.width = img.naturalWidth || 800; c.height = img.naturalHeight || 1200;
+      c.width = w; c.height = h;
       const ctx = c.getContext('2d');
-      ctx.fillStyle='#fff'; ctx.fillRect(0,0,c.width,c.height);
+      ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h);
       ctx.drawImage(img,0,0);
       URL.revokeObjectURL(url);
-      resolve({ dataUrl:c.toDataURL('image/jpeg',0.92), w:c.width, h:c.height });
+      let variance = 999; // 读不到就按正常图处理
+      try{
+        const step = Math.max(1, Math.floor((w*h)/2000));
+        const data = ctx.getImageData(0,0,w,h).data;
+        let sum=0, n=0;
+        for(let i=0;i<data.length;i+=4*step){ sum+=(data[i]+data[i+1]+data[i+2])/3; n++; }
+        const mean=sum/n; let s=0;
+        for(let i=0;i<data.length;i+=4*step){ const v=(data[i]+data[i+1]+data[i+2])/3-mean; s+=v*v; }
+        variance=Math.sqrt(s/n);
+      }catch(_){}
+      resolve({ dataUrl:c.toDataURL('image/jpeg',0.92), w, h, variance, size: blob.size });
     };
     img.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error('图片解码失败')); };
     img.src = url;
@@ -187,13 +210,9 @@ async function mapLimit(items, limit, fn){
 }
 
 // /image 接口（已核对 legado 源码 BookController.getImg）：
-//   url  = bookUrl（书籍地址，legado 用它在数据库查书+书源）
-//   path = 图片 src（完整值，含 ,{headers} JSON，legado 内部 AnalyzeUrl 会解析出 Referer）
-//   width= 解码宽度（默认 640 太糊，显式传大值）
-// 下载失败时 legado 不报错，而是返回一张 errorBitmap 错误占位图（HTTP 200、image 类型），
-// 无法靠状态码识别 —— 用字节数阈值识别占位图（漫画页不可能 <8KB）。
-const PLACEHOLDER_BYTES = 8192;
-async function fetchImage(bookUrl, fullSrc){
+//   url=bookUrl（查书+书源）  path=完整 src（含 ,{headers} JSON，legado 解析 Referer）  width=解码宽度
+// 下载失败 legado 不报错，返回 errorBitmap 占位图（HTTP 200）。
+async function downloadToJpeg(bookUrl, fullSrc){
   const u = '/image?url='+encodeURIComponent(bookUrl)
           +'&path='+encodeURIComponent(fullSrc)
           +'&width=1440';
@@ -210,10 +229,74 @@ async function fetchImage(bookUrl, fullSrc){
     const t = await blob.text().catch(()=> '');
     throw new Error('非图片 ct='+ct+' body='+t.slice(0,100));
   }
-  if(blob.size < PLACEHOLDER_BYTES){
-    throw new Error('__PLACEHOLDER__'); // legado 错误占位图（防盗链 403 等），跳过
-  }
   return await blobToJpeg(blob);
+}
+
+// 取一张图：网络错误重试；占位图（防盗链/半截）直接标记不再重试
+async function fetchItem(bookUrl, it){
+  let lastErr='';
+  for(let a=0; a<RETRIES; a++){
+    try{
+      const jpg = await downloadToJpeg(bookUrl, it.src);
+      const broken = jpg.size < PLACEHOLDER_BYTES || jpg.variance < VAR_THRESHOLD;
+      it.data = broken ? null : jpg;
+      it.broken = broken;
+      it.err  = broken ? '坏图/占位图' : '';
+      return;
+    }catch(e){
+      lastErr = e.message;
+      if(a < RETRIES-1) continue; // 网络错误重试，占位图不重试
+    }
+  }
+  it.data=null; it.broken=true; it.err=lastErr;
+}
+
+// 全局并发池取图（跨章节统一调度，吞吐更高）
+async function runFetch(items, bookUrl, onOne){
+  await mapLimit(items, CONCURRENCY, async (it)=>{
+    await fetchItem(bookUrl, it);
+    onOne(it);
+  });
+}
+
+// 文件名非法字符清洗
+function safeName(s){
+  return (s||'').replace(/[\\/:*?"<>|]/g,'_').trim() || '未命名';
+}
+// 文件名规则：单章→漫画名_章节名；多选→漫画名_范围（连续 1-5，否则 1,3,5）
+function makeFname(bookName, idxs){
+  const name = safeName(bookName);
+  const sorted = [...idxs].sort((a,b)=>a-b);
+  if(sorted.length === 1){
+    const ch = CHAPTERS[sorted[0]];
+    const chName = safeName(ch ? (ch.name||ch.title) : ('第'+(sorted[0]+1)+'话'));
+    return name + '_' + chName + '.pdf';
+  }
+  const disp = sorted.map(i=>i+1);
+  let range;
+  if(disp[disp.length-1] - disp[0] === disp.length-1) range = disp[0] + '-' + disp[disp.length-1];
+  else range = disp.join(',');
+  return name + '_' + range + '话.pdf';
+}
+
+// 按顺序合成 PDF（跳过坏图，保持页码对应）
+function renderPdf(bookName, idxs){
+  const jspdf = window.jspdf.jsPDF;
+  const doc = new jspdf({orientation:'portrait', unit:'pt', format:'a4'});
+  const pw = doc.internal.pageSize.getWidth();
+  const ph = doc.internal.pageSize.getHeight();
+  let n=0;
+  for(const it of IMAGES){
+    if(!it.data) continue;
+    if(n>0) doc.addPage();
+    const p=it.data, scale = Math.min(pw/p.w, ph/p.h);
+    const w=p.w*scale, h=p.h*scale;
+    doc.addImage(p.dataUrl, 'JPEG', (pw-w)/2, (ph-h)/2, w, h);
+    n++;
+  }
+  builtDoc = doc;
+  builtDoc._fname = makeFname(bookName, idxs);
+  return n;
 }
 
 async function build(){
@@ -222,12 +305,12 @@ async function build(){
   const bookName = (b.name || b.bookName || 'legado') + '';
   const idxs = [...SELECTED].sort((x,y)=>x-y);
   if(!idxs.length){ setStatus('请先勾选至少一话。'); return; }
-  $('#btnBuild').disabled = true;
+  $('#btnBuild').disabled = true; $('#btnReDL').style.display='none';
+  IMAGES = [];
   try{
-    // 阶段一：收集各章图片 URL（先统计总数，进度才准）
+    // 阶段一：收集各章图片到扁平列表（保留位置/章节，便于坏图重下）
     setStatus('收集章节图片列表…');
-    const chaptersData = [];
-    let total = 0;
+    let total=0;
     for(const ci of idxs){
       const ch = CHAPTERS[ci];
       setStatus('读取第 '+(ci+1)+' 话：'+(ch.name||ch.title||'')+' …');
@@ -238,63 +321,66 @@ async function build(){
       }catch(e){ setStatus('第'+(ci+1)+'话正文失败：'+e.message+'（跳过）'); continue; }
       const urls = extractImages(content);
       if(!urls.length){ setStatus('第'+(ci+1)+'话无图片（可能是文字章，跳过）'); continue; }
-      chaptersData.push({ci, urls});
+      for(const u of urls){
+        IMAGES.push({ ci, chName:(ch.name||ch.title||('第'+ci)), url:u.url, src:u.src,
+                      data:null, broken:false, err:'' });
+      }
       total += urls.length;
     }
     if(!total){ setStatus('没有可生成的图片。'); $('#btnBuild').disabled=false; return; }
 
-    // 阶段二：逐张取图，实时更新进度
-    setStatus('开始取图，共 '+total+' 张…');
-    const pages = [];
-    let done = 0, failed = 0, placeholders = 0, lastErr = '';
-    for(const {ci, urls} of chaptersData){
-      const imgs = await mapLimit(urls, 4, async (img)=>{
-        try{
-          const im = await fetchImage(bookUrl, img.src);
-          done++; setProg(done/total);
-          return im;
-        }catch(e){
-          done++; setProg(done/total);
-          if(e.message === '__PLACEHOLDER__'){
-            placeholders++;
-            return null;
-          }
-          failed++; lastErr = e.message;
-          setStatus('第'+(ci+1)+'话 1 张取图失败：'+e.message);
-          return null;
-        }
-      });
-      for(const im of imgs){ if(im) pages.push(im); }
-    }
+    // 阶段二：全局并发取图，实时统计坏图
+    setStatus('开始取图，共 '+total+' 张（并发 '+CONCURRENCY+'）…');
+    let done=0, broken=0;
+    await runFetch(IMAGES, bookUrl, (it)=>{
+      done++; if(it.broken) broken++;
+      setProg(done/total);
+      if(it.broken) setStatus('取图中 '+done+'/'+total+' … 已发现坏图 '+broken+' 张');
+    });
 
-    if(!pages.length){
-      setStatus('全部图片取图失败。\n'
-        + (placeholders ? '其中 '+placeholders+' 张是 legado 错误占位图（防盗链 403 等）。\n' : '')
-        + '最后错误：'+ (lastErr || '无') + '\n把这段报错发我即可定位。');
+    const n = renderPdf(bookName, idxs);
+    if(!n){
+      const lastErr = (IMAGES.find(i=>i.err && i.err!=='坏图/占位图')||{}).err || '占位图';
+      setStatus('全部图片取图失败/坏图。\n最后错误：'+lastErr+'\n把这段报错发我即可定位。');
       $('#btnBuild').disabled=false; return;
     }
-
-    setStatus('合成 PDF（'+pages.length+' 张）…');
-    const jspdf = window.jspdf.jsPDF;
-    const doc = new jspdf({orientation:'portrait', unit:'pt', format:'a4'});
-    const pw = doc.internal.pageSize.getWidth();
-    const ph = doc.internal.pageSize.getHeight();
-    pages.forEach((p,i)=>{
-      if(i>0) doc.addPage();
-      const scale = Math.min(pw/p.w, ph/p.h);
-      const w = p.w*scale, h = p.h*scale;
-      doc.addImage(p.dataUrl, 'JPEG', (pw-w)/2, (ph-h)/2, w, h);
-    });
-    builtDoc = doc;
-    const name = bookName.replace(/[\\/:*?"<>|]/g,'_');
-    builtDoc._fname = name + '_' + idxs.length + '话.pdf';
-    setStatus('✅ 完成！共 '+pages.length+' 张'
-      + (placeholders ? '，跳过 '+placeholders+' 张错误占位图' : '')
-      + (failed ? '，失败 '+failed+' 张' : '')
-      + '。\n点击底部按钮保存：'+builtDoc._fname);
+    setStatus('✅ 完成！成功 '+n+' 张'
+      + (broken ? '，坏图 '+broken+' 张（点下面按钮可只重下坏图）' : '')
+      + '。\n点击底部保存：'+builtDoc._fname);
     $('#fab').textContent = '⬇️ 保存 '+builtDoc._fname;
+    if(broken){
+      $('#btnReDL').style.display='';
+      $('#btnReDL').textContent='🔄 重新下载坏图 ('+broken+')';
+    }
   }catch(e){ setStatus('生成出错：'+e.message); }
   finally{ $('#btnBuild').disabled = false; }
+}
+
+// 只重下坏图：再请求一次（legado 有缓存，常在第二次成功），然后重排 PDF
+async function reDownloadBroken(){
+  const bad = IMAGES.filter(it=>it.broken);
+  if(!bad.length){ setStatus('当前没有坏图。'); return; }
+  $('#btnReDL').disabled = true; $('#btnBuild').disabled = true;
+  const b = BOOKS[+$('#bookSel').value];
+  const bookUrl = b.bookUrl || b.url;
+  const bookName = (b.name || b.bookName || 'legado') + '';
+  try{
+    setStatus('重新下载坏图，共 '+bad.length+' 张…');
+    let done=0, still=0;
+    await runFetch(bad, bookUrl, (it)=>{
+      done++; if(it.broken) still++;
+      setProg(done/bad.length);
+    });
+    const n = renderPdf(bookName, [...SELECTED]);
+    if(still){
+      setStatus('重下完成，仍有 '+still+' 张坏图（图源/网络不稳，可再点一次重下）。\n成功 '+n+' 张。');
+      $('#btnReDL').textContent='🔄 再试下载坏图 ('+still+')';
+    }else{
+      setStatus('🎉 全部坏图已补回！成功 '+n+' 张。点击下方保存。');
+      $('#btnReDL').style.display='none';
+    }
+  }catch(e){ setStatus('重下出错：'+e.message); }
+  finally{ $('#btnReDL').disabled=false; $('#btnBuild').disabled=false; }
 }
 
 function save(){
@@ -322,6 +408,7 @@ $('#btnRange').addEventListener('click', ()=>{
   setStatus('已选第 '+Math.min(a,b)+'~'+Math.max(a,b)+' 话。');
 });
 $('#btnBuild').addEventListener('click', build);
+$('#btnReDL').addEventListener('click', reDownloadBroken);
 $('#fab').addEventListener('click', save);
 </script>
 </body>
