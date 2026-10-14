@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Legado 连接诊断</title>
+<style>
+  body{font:15px/1.6 system-ui,-apple-system,"Microsoft YaHei",sans-serif;margin:0;padding:16px;background:#0f1115;color:#e6e6e6}
+  h2{font-size:18px;margin:0 0 4px}
+  .tip{color:#9aa0a6;font-size:13px;margin:0 0 14px}
+  button{display:block;width:100%;margin:8px 0;padding:14px;font-size:15px;border:0;border-radius:10px;background:#2b6cff;color:#fff;cursor:pointer}
+  button:active{opacity:.85}
+  #run{background:#1faa59}
+  pre{background:#000;color:#7CFC00;padding:12px;border-radius:10px;white-space:pre-wrap;word-break:break-all;max-height:55vh;overflow:auto;font-size:12.5px}
+  .err{color:#ff6b6b}
+  .ok{color:#51e898}
+</style>
+</head>
+<body>
+  <h2>📡 Legado Web 服务连接诊断</h2>
+  <p class="tip">前置：手机上 legado 已开启「Web 服务」（设置→其他→Web 服务，默认端口 1122）。本页用手机浏览器打开，点「开始检测」。</p>
+  <button id="run">▶ 开始检测（连通性 + CORS + 取图链路）</button>
+  <pre id="out">等待检测…</pre>
+
+<script>
+const BASE = 'http://127.0.0.1:1122';
+const out = document.getElementById('out');
+function log(s, cls){ const d=document.createElement('div'); if(cls) d.className=cls; d.textContent=s; out.appendChild(d); out.scrollTop=out.scrollHeight; }
+function heads(h){ const a=[]; h.forEach((v,k)=>a.push(k+': '+v)); return a.join('\n'); }
+
+async function jget(u){ const r=await fetch(u); if(!r.ok) throw new Error('HTTP '+r.status); const t=await r.text(); try{return JSON.parse(t);}catch(e){return {__raw:t};} }
+
+document.getElementById('run').onclick = async () => {
+  out.innerHTML='';
+  log('▶ 目标: '+BASE+'  (本机 legado)','');
+  log('（若本页是 https 打开，会顺便验证 127.0.0.1 混合内容豁免）\n');
+
+  // ---- 1. 连通 + CORS 头 ----
+  log('【1】GET /getBookshelf  —— 检测连通与 CORS 头');
+  let shelf;
+  try{
+    const r = await fetch(BASE+'/getBookshelf');
+    log('状态: '+r.status+' '+r.statusText,'ok');
+    const acao=r.headers.get('access-control-allow-origin');
+    log('响应头:\n'+heads(r.headers));
+    if(acao) log('✅ 有 CORS 头: '+acao+'  → 跨域 fetch 直接可用（含 /image 读像素）','ok');
+    else     log('❌ 无 access-control-allow-origin → 跨域 fetch 会被拦，需用同源/代理方案','err');
+    shelf = await r.json();
+  }catch(e){
+    log('❌ 连接失败: '+e.message,'err');
+    if(/mixed|Mixed|内容|content/i.test(e.message)) log('   → 疑似混合内容被拦：本页需改 http 打开，或让 legado 同源托管本页','err');
+    else log('   → 检查：legado Web 服务开了吗？端口是 1122 吗？本页是否在手机上打开？','err');
+    return;
+  }
+
+  // ---- 2. 书架结构 ----
+  try{
+    const books = shelf.data || shelf;
+    log('\n【2】书架: 共 '+(books.length||0)+' 本');
+    if(!books.length){ log('书架为空，跳过后续','err'); return; }
+    const book = books[0];
+    log('首本: '+(book.name||book.bookName||'(无名)')+'  bookUrl='+(book.bookUrl||'(无)'));
+    if(!book.bookUrl){ log('❌ bookUrl 缺失，无法继续','err'); return; }
+
+    // ---- 3. 章节列表 ----
+    log('\n【3】GET /getChapterList  (取章节，证明可「按需不选全本」)');
+    const cl = await jget(BASE+'/getChapterList?url='+encodeURIComponent(book.bookUrl));
+    const chaps = cl.data || cl;
+    log('章节数: '+(chaps.length||0));
+    if(!chaps.length){ log('无章节','err'); return; }
+    const ch0 = chaps[0];
+    const idx = (ch0.index!=null)? ch0.index : 0;
+    log('首章: '+(ch0.name||'(无名)')+'  index='+idx);
+
+    // ---- 4. 章节正文 + 提取图片 ----
+    log('\n【4】GET /getBookContent?index='+idx+'  (取正文，漫画=img 标签)');
+    const ct = await fetch(BASE+'/getBookContent?url='+encodeURIComponent(book.bookUrl)+'&index='+idx);
+    const cj = await ct.text();
+    let html = cj;
+    try{ const o=JSON.parse(cj); html = o.data && o.data.content ? o.data.content : (o.content||cj); }catch(e){}
+    const m = html.match(/<img\b[^>]*\ssrc=["']([^"']+)["']/i);
+    if(!m){ log('本章未找到 <img>（可能不是漫画章或结构不同）','err'); log('正文前 300 字:\n'+html.slice(0,300)); return; }
+    const picPath = m[1];
+    log('✅ 提取到图片路径: '+picPath,'ok');
+
+    // ---- 5. <img> 显示（不需 CORS） ----
+    log('\n【5】<img src=/image> 显示测试（跨域显示不需要 CORS）');
+    const im = new Image();
+    im.onload  = ()=>log('✅ 图片能显示（防盗链已由 legado 处理）','ok');
+    im.onerror = ()=>log('❌ 图片显示失败','err');
+    im.src = BASE+'/image?url='+encodeURIComponent(book.bookUrl)+'&path='+encodeURIComponent(picPath);
+
+    // ---- 6. fetch /image 读像素（需 CORS 头，决定能否合成 PDF） ----
+    log('\n【6】fetch /image 读像素测试（决定能否 canvas 合成 PDF）');
+    try{
+      const ir = await fetch(BASE+'/image?url='+encodeURIComponent(book.bookUrl)+'&path='+encodeURIComponent(picPath));
+      log('状态: '+ir.status);
+      const acao2=ir.headers.get('access-control-allow-origin');
+      const blob = await ir.blob();
+      log('图片字节: '+blob.size+'  ('+blob.type+')');
+      if(acao2){ log('✅ /image 有 CORS 头 → canvas 不污染 → 可直接合成 PDF（纯静态页即可）','ok'); }
+      else { log('❌ /image 无 CORS 头 → canvas 会被污染，合成 PDF 需同源托管本页','err'); }
+    }catch(e){ log('❌ fetch /image 失败: '+e.message,'err'); }
+  }catch(e){ log('\n❌ 链路中断: '+e.message,'err'); }
+};
+</script>
+</body>
+</html>
