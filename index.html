@@ -47,6 +47,18 @@
     .dialog-ops { display: flex; gap: 10px; margin-top: 18px; }
     .dialog-ops .btn { flex: 1; text-align: center; }
     .empty { color: #9ca3af; font-size: 14px; text-align: center; padding: 16px 0; }
+    .item { cursor: pointer; border-radius: 10px; padding-left: 8px; padding-right: 8px; }
+    .item.sel { background: #eef2ff; box-shadow: inset 0 0 0 1px #c7d2fe; }
+    .pickrow { display: flex; align-items: flex-start; gap: 10px; }
+    .pickrow input { width: 20px; height: 20px; margin-top: 1px;
+      accent-color: #4f46e5; pointer-events: none; flex: none; }
+    .pickrow .name { flex: 1; min-width: 0; }
+    .bulk { margin-top: 14px; padding-top: 14px; border-top: 1px solid #e5e7eb; display: none; }
+    .bulk.show { display: block; }
+    .bulk-top { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+    .selcount { font-size: 13px; color: #6b7280; }
+    .bulk-ops { display: flex; gap: 8px; flex-wrap: wrap; }
+    .bulk-ops .btn:disabled { background: #d1d5db; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -79,11 +91,32 @@
   <div class="card">
     <h2>📤 上传记录</h2>
     <div id="uploads"></div>
+    <div class="bulk" id="upBulk">
+      <div class="bulk-top">
+        <button class="btn small gray" id="upAll">全选</button>
+        <span class="selcount" id="upCount">已选 0 条</span>
+      </div>
+      <div class="bulk-ops">
+        <button class="btn small danger" id="upDelete">删除记录</button>
+      </div>
+    </div>
   </div>
 
   <div class="card">
     <h2>我的 PDF 库</h2>
     <div id="library"></div>
+    <div class="bulk" id="pdfBulk">
+      <div class="bulk-top">
+        <button class="btn small gray" id="pdfAll">全选</button>
+        <span class="selcount" id="pdfCount">已选 0 个</span>
+      </div>
+      <div class="bulk-ops">
+        <button class="btn small" id="pdfShare">打开 LocalSend</button>
+        <button class="btn small gray" id="pdfRename">重命名</button>
+        <button class="btn small gray" id="pdfDownload">下载</button>
+        <button class="btn small danger" id="pdfDelete">删除</button>
+      </div>
+    </div>
   </div>
 
   <script src="vendor/jszip.min.js"></script>
@@ -550,31 +583,66 @@
     async function renderUploads() {
       const list = await dbAllUploads();
       const el = document.getElementById('uploads');
+      const bulk = document.getElementById('upBulk');
       if (!list.length) {
         el.innerHTML = '<div class="empty">还没有上传记录</div>';
+        if (bulk) bulk.classList.remove('show');
+        selUploads.clear();
         return;
       }
       el.innerHTML = '';
       list.sort((a, b) => (b.id + '').localeCompare(a.id + '', undefined, { numeric: true }))
         .forEach(rec => {
           const div = document.createElement('div');
-          div.className = 'item';
+          const on = selUploads.has(rec.id);
+          div.className = 'item' + (on ? ' sel' : '');
           const icon = rec.kind === 'zip' ? '📦' : '🖼️';
           const badge = rec.ok
             ? '<span style="color:#059669">✅ ' + escapeHtml(rec.result || '成功') + '</span>'
             : '<span style="color:#dc2626">❌ ' + escapeHtml(rec.note || '失败') + '</span>';
           div.innerHTML =
-            '<div class="name">' + icon + ' ' + escapeHtml(rec.name) + '</div>' +
+            '<div class="pickrow">' +
+              '<input type="checkbox"' + (on ? ' checked' : '') + '>' +
+              '<span class="name">' + icon + ' ' + escapeHtml(rec.name) + '</span>' +
+            '</div>' +
             '<div class="meta">' + rec.createdAt + ' · ' + fmtSize(rec.size) +
               (rec.detail ? ' · ' + escapeHtml(rec.detail) : '') + '</div>' +
-            '<div class="meta">' + badge + '</div>' +
-            '<div class="ops"><button class="btn small danger" data-act="delup">删除记录</button></div>';
-          div.querySelector('[data-act=delup]').onclick = async () => {
-            await dbDeleteUpload(rec.id);
+            '<div class="meta">' + badge + '</div>';
+          div.onclick = () => {
+            selUploads.has(rec.id) ? selUploads.delete(rec.id) : selUploads.add(rec.id);
             renderUploads();
           };
           el.appendChild(div);
         });
+      updateBulkBar('up', list.length);
+    }
+
+    // ================= 多选状态 =================
+    const selPdfs = new Set();
+    const selUploads = new Set();
+
+    // 更新列表底部的操作栏：显示已选数量、控制按钮可用性
+    function updateBulkBar(kind, total) {
+      const prefix = kind === 'up' ? 'up' : 'pdf';
+      const bulk = document.getElementById(prefix + 'Bulk');
+      const count = document.getElementById(prefix + 'Count');
+      const set = kind === 'up' ? selUploads : selPdfs;
+      if (!bulk || !count) return;
+      if (!total) { bulk.classList.remove('show'); return; }
+      bulk.classList.add('show');
+      const n = set.size;
+      count.textContent = kind === 'up'
+        ? (n ? '已选 ' + n + ' 条' : '共 ' + total + ' 条')
+        : (n ? '已选 ' + n + ' 个' : '共 ' + total + ' 个');
+      document.getElementById(prefix + 'All').textContent = n === total ? '取消全选' : '全选';
+      if (kind === 'pdf') {
+        document.getElementById('pdfShare').disabled = n === 0;
+        document.getElementById('pdfDownload').disabled = n === 0;
+        document.getElementById('pdfDelete').disabled = n === 0;
+        document.getElementById('pdfRename').disabled = n !== 1;   // 重命名只能单个
+      } else {
+        document.getElementById('upDelete').disabled = n === 0;
+      }
     }
 
     // ================= PDF 库列表 =================
@@ -583,35 +651,37 @@
       const el = document.getElementById('library');
       if (!list.length) {
         el.innerHTML = '<div class="empty">还没有 PDF，先转换一个 ZIP 吧</div>';
+        selPdfs.clear();
+        updateBulkBar('pdf', 0);
         return;
       }
       el.innerHTML = '';
       list.sort((a, b) => (b.id + '').localeCompare(a.id + '', undefined, { numeric: true }))
           .forEach(rec => {
         const div = document.createElement('div');
-        div.className = 'item';
+        const on = selPdfs.has(rec.id);
+        div.className = 'item' + (on ? ' sel' : '');
         // 单个 PDF 过大只是提醒，不阻止生成
         const bigWarn = rec.size > BIG_PDF_BYTES
           ? '<div class="meta" style="color:#dc2626">⚠️ 超过 ' + BIG_PDF_LABEL +
             '：多数邮箱附件和在线上传都有此限制，建议拆成多个 PDF</div>'
           : '';
-        div.innerHTML = `
-          <div class="name">${rec.name}</div>
-          <div class="meta">${rec.createdAt} · ${(rec.size / 1024 / 1024).toFixed(2)} MB
-            · ${rec.sent ? '✅ 已分享' : '⬜ 未分享'}</div>
-          ${bigWarn}
-          <div class="ops">
-            <button class="btn small" data-act="share">打开 LocalSend</button>
-            <button class="btn small gray" data-act="rename">重命名</button>
-            <button class="btn small gray" data-act="download">下载</button>
-            <button class="btn small danger" data-act="delete">删除</button>
-          </div>`;
-        div.querySelector('[data-act=share]').onclick = () => shareFile(rec);
-        div.querySelector('[data-act=rename]').onclick = () => rename(rec);
-        div.querySelector('[data-act=download]').onclick = () => download(rec);
-        div.querySelector('[data-act=delete]').onclick = () => remove(rec);
+        div.innerHTML =
+          '<div class="pickrow">' +
+            '<input type="checkbox"' + (on ? ' checked' : '') + '>' +
+            '<span class="name">' + escapeHtml(rec.name) + '</span>' +
+          '</div>' +
+          '<div class="meta">' + rec.createdAt + ' · ' +
+            (rec.size / 1024 / 1024).toFixed(2) + ' MB' +
+            ' · ' + (rec.sent ? '✅ 已分享' : '⬜ 未分享') + '</div>' +
+          bigWarn;
+        div.onclick = () => {
+          selPdfs.has(rec.id) ? selPdfs.delete(rec.id) : selPdfs.add(rec.id);
+          renderLibrary();
+        };
         el.appendChild(div);
       });
+      updateBulkBar('pdf', list.length);
     }
 
     // ================= 重命名 =================
@@ -656,22 +726,24 @@
     // 用 Web Share API 拉起系统分享面板，再手动选择 LocalSend 接收。
     // 两个硬性条件：① 页面必须是 HTTPS ② 必须由用户点击直接触发（不能放在 await 之后）。
     // 文件不会先落到「下载」文件夹，而是直接交给系统面板。
-    async function shareFile(rec) {
+    // recs: 一条或多条 PDF 记录（Web Share 支持一次分享多个文件）
+    async function shareFiles(recs) {
+      if (!recs || !recs.length) return;
       const status = document.getElementById('status');
-      const file = new File([rec.blob], rec.name, { type: 'application/pdf' });
+      const files = recs.map(r => new File([r.blob], r.name, { type: 'application/pdf' }));
       let shareErr = null;
 
-      // canShare() 只接受 files 属性（web.dev 明确说明），且只在它明确返回 false 时才放弃。
-      // canShare 缺失或误报 true 的浏览器，仍要实际试一次才知道。
-      const blocked = !!(navigator.canShare && navigator.canShare({ files: [file] }) === false);
+      // canShare() 只接受 files 属性，且只在它明确返回 false 时才放弃
+      const blocked = !!(navigator.canShare && navigator.canShare({ files }) === false);
 
-      // ⚠️ 只尝试一次，绝不重试：
-      // navigator.share() 会消耗掉「用户手势(transient activation)」，
-      // 第二次调用必然抛 NotAllowedError: Must be handling a user gesture。
+      // ⚠️ 只尝试一次，绝不重试：share() 会消耗用户手势，重试必抛 NotAllowedError
       if (navigator.share && !blocked) {
         try {
-          await navigator.share({ files: [file], title: rec.name });
-          await dbPut({ ...rec, sent: true });
+          await navigator.share({
+            files,
+            title: recs.length === 1 ? recs[0].name : recs.length + ' 个 PDF'
+          });
+          for (const r of recs) await dbPut({ ...r, sent: true });
           renderLibrary();
           return;
         } catch (e) {
@@ -680,39 +752,27 @@
         }
       }
 
-      // 带上真实错误原因，方便定位
-      const reason = shareErr
-        ? '<br><span style="font-size:12px;color:#9ca3af">失败原因：' +
-          escapeHtml(shareErr.name || '未知') +
-          (shareErr.message ? ' · ' + escapeHtml(shareErr.message) : '') + '</span>'
-        : '';
-
-      // NotAllowedError 常见于浏览器认定「这次点击没带有效手势」，单独给建议
-      const gestureTip = shareErr && shareErr.name === 'NotAllowedError'
-        ? '<br><br>这个错误表示浏览器认为点击时没有有效的用户手势。' +
-          '可以试试：<b>重新点一次按钮，并在面板弹出后立刻选择 LocalSend</b>；' +
-          '若仍失败，该浏览器（如 Edge）多半实现不完整。'
-        : '';
-
       // 先弹窗说明情况，由用户自己决定要不要下载，不擅自落文件
       const wantDownload = await askConfirm({
         title: '无法调起系统分享面板',
-        message: '当前浏览器没能分享这个文件（Via 等套壳浏览器无此能力，' +
-          'Edge 等也可能实现不完整）。' + reason + gestureTip + '<br><br>' +
-          '改用 <b>Chrome</b> 打开本页通常可以正常分享。<br><br>' +
-          '是否改为<b>下载到本机</b>？下载后可在 LocalSend 里手动选择发送。',
+        message: '当前浏览器不支持直接分享文件。' +
+          (shareErr ? '<br>原因：' + escapeHtml(shareErr.name || '未知') : '') +
+          '<br><br>是否改为<b>下载到本机</b>？',
         okText: '直接下载',
-        cancelText: '换浏览器再来'
+        cancelText: '取消'
       });
 
       if (!wantDownload) {
-        status.textContent = '已取消，未下载。用 Chrome / Edge 打开本页即可直接分享给 LocalSend。';
+        status.textContent = '已取消，未下载。';
         return;
       }
 
-      download(rec);
-      status.innerHTML = '已下载到本机，可在 LocalSend 里用「发送」选择这个文件。';
-      await dbPut({ ...rec, sent: true });
+      for (const r of recs) {
+        download(r);
+        await new Promise(res => setTimeout(res, 400));  // 多个下载之间留点间隔
+      }
+      status.textContent = '已下载 ' + recs.length + ' 个文件到本机。';
+      for (const r of recs) await dbPut({ ...r, sent: true });
       renderLibrary();
     }
 
@@ -728,10 +788,72 @@
       setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
     }
 
-    async function remove(rec) {
-      if (!confirm(`删除「${rec.name}」？\n（App 内副本会被删除；已下载到手机里的原件请自行删除）`)) return;
-      await dbDelete(rec.id);
-      renderLibrary();
+    // ================= 批量操作（底部操作栏）=================
+    async function selectedPdfs() {
+      const list = await dbAll();
+      return list.filter(r => selPdfs.has(r.id));
+    }
+    async function selectedUploads() {
+      const list = await dbAllUploads();
+      return list.filter(r => selUploads.has(r.id));
+    }
+
+    function bindBulk() {
+      // ---- PDF 库 ----
+      document.getElementById('pdfAll').onclick = async () => {
+        const list = await dbAll();
+        if (selPdfs.size === list.length) selPdfs.clear();
+        else list.forEach(r => selPdfs.add(r.id));
+        renderLibrary();
+      };
+      document.getElementById('pdfShare').onclick = async () => {
+        shareFiles(await selectedPdfs());
+      };
+      document.getElementById('pdfDownload').onclick = async () => {
+        const recs = await selectedPdfs();
+        for (const r of recs) {
+          download(r);
+          await new Promise(res => setTimeout(res, 400));  // 多个下载间留间隔
+        }
+        document.getElementById('status').textContent = '已下载 ' + recs.length + ' 个文件。';
+      };
+      document.getElementById('pdfRename').onclick = async () => {
+        const recs = await selectedPdfs();
+        if (recs.length === 1) rename(recs[0]);
+      };
+      document.getElementById('pdfDelete').onclick = async () => {
+        const recs = await selectedPdfs();
+        if (!recs.length) return;
+        const okd = await askConfirm({
+          title: '删除所选 PDF',
+          message: '将删除选中的 <b>' + recs.length + '</b> 个 PDF（App 内副本）。<br>' +
+            '已下载到手机里的原件请自行删除。',
+          okText: '删除', cancelText: '取消'
+        });
+        if (!okd) return;
+        for (const r of recs) { await dbDelete(r.id); selPdfs.delete(r.id); }
+        renderLibrary();
+      };
+
+      // ---- 上传记录 ----
+      document.getElementById('upAll').onclick = async () => {
+        const list = await dbAllUploads();
+        if (selUploads.size === list.length) selUploads.clear();
+        else list.forEach(r => selUploads.add(r.id));
+        renderUploads();
+      };
+      document.getElementById('upDelete').onclick = async () => {
+        const recs = await selectedUploads();
+        if (!recs.length) return;
+        const okd = await askConfirm({
+          title: '删除上传记录',
+          message: '将删除选中的 <b>' + recs.length + '</b> 条记录（不影响已生成的 PDF）。',
+          okText: '删除', cancelText: '取消'
+        });
+        if (!okd) return;
+        for (const r of recs) { await dbDeleteUpload(r.id); selUploads.delete(r.id); }
+        renderUploads();
+      };
     }
 
     // ================= 初始化 =================
@@ -742,6 +864,7 @@
       try { localStorage.removeItem('zip2pdf.kindleEmail'); } catch (e) {}
       try {
         db = await openDB();
+        bindBulk();
         renderUploads();
         renderLibrary();
       } catch (e) {
