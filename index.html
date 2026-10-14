@@ -70,8 +70,9 @@
       max-width: min(360px, calc(100vw - 40px)); overflow-wrap: anywhere; }
     .dialog h3 { font-size: 17px; color: #1f2937; margin-bottom: 10px; overflow-wrap: anywhere; }
     .dialog p { font-size: 13px; color: #6b7280; line-height: 1.7; overflow-wrap: anywhere; word-break: break-word; }
-    .dialog-ops { display: flex; gap: 10px; margin-top: 18px; }
-    .dialog-ops .btn { flex: 1; text-align: center; }
+    .dialog-ops { display: flex; gap: 8px; margin-top: 18px; }
+    .dialog-ops .btn { flex: 1; min-width: 0; text-align: center; white-space: nowrap;
+      font-size: 13px; padding: 10px 6px; }
     .empty { color: #9ca3af; font-size: 14px; text-align: center; padding: 16px 0; }
     .item { cursor: pointer; border-radius: 10px; padding-left: 8px; padding-right: 8px; }
     .item.sel { background: #eef2ff; box-shadow: inset 0 0 0 1px #c7d2fe; }
@@ -152,7 +153,7 @@
         <label>选择书籍</label>
         <div class="row" style="margin-bottom:8px">
           <select id="legadoBookSel" class="sel-select" style="flex:1 1 auto"></select>
-          <input type="text" id="bookSearch" placeholder="🔍 搜索书名" class="sel-select" style="flex:0 1 130px">
+          <input type="text" id="bookSearch" placeholder="🔍 搜索" class="sel-select" style="flex:0 1 130px">
         </div>
         <div class="row" style="margin-top:4px">
           <button class="btn small gray" id="btnChapters">读取章节</button>
@@ -163,8 +164,8 @@
       <div id="legadoChCard" style="display:none; margin-top:16px; padding-top:14px; border-top:1px solid #e5e7eb">
         <label>选择要转换的章节</label>
         <div class="row" style="margin-bottom:8px">
-          <span style="font-size:13px;color:#374151">显示顺序</span>
-          <select id="chapterOrder" class="sel-select" style="flex:1 1 auto">
+          <span style="font-size:13px;color:#374151;flex:1 1 0;min-width:0">显示顺序</span>
+          <select id="chapterOrder" class="sel-select" style="flex:1 1 0;min-width:0">
             <option value="asc">正序（1→N）</option>
             <option value="desc">倒序（N→1）</option>
           </select>
@@ -842,7 +843,7 @@
       else { await dbPut({ ...rec, name }); renderLibrary(); }
     }
 
-    // ================= 通用确认弹窗 =================
+    // ================= 通用确认弹窗（支持第三个按钮，返回 'extra'）=================
     function askConfirm(opts) {
       return new Promise(res => {
         const mask = document.createElement('div');
@@ -852,38 +853,41 @@
             '<h3></h3><p></p>' +
             '<div class="dialog-ops">' +
               '<button class="btn gray" data-act="no"></button>' +
+              (opts.extraText ? '<button class="btn gray" data-act="extra"></button>' : '') +
               '<button class="btn" data-act="yes"></button>' +
             '</div>' +
           '</div>';
         mask.querySelector('h3').textContent = opts.title || '';
         mask.querySelector('p').innerHTML = opts.message || '';
         mask.querySelector('[data-act=no]').textContent = opts.cancelText || '取消';
+        if (opts.extraText) mask.querySelector('[data-act=extra]').textContent = opts.extraText;
         mask.querySelector('[data-act=yes]').textContent = opts.okText || '确定';
         document.body.appendChild(mask);
         mask.style.display = 'flex';
         const close = v => { mask.remove(); res(v); };
         mask.querySelector('[data-act=no]').onclick = () => close(false);
+        if (opts.extraText) mask.querySelector('[data-act=extra]').onclick = () => close('extra');
         mask.querySelector('[data-act=yes]').onclick = () => close(true);
         mask.onclick = e => { if (e.target === mask) close(false); };
       });
     }
 
     // ================= 分享到其它 App（LocalSend 等）=================
-    // Chromium 的 navigator.share 对大 blob 支持不稳：单文件 >64MB 或合计 >128MB
-    // 时会直接抛 NotAllowedError，多选时尤其明显 → 超过阈值直接走下载降级
-    // 分享大小阈值：放宽到 500MB。超限不再直接跳过，仍先尝试 navigator.share，
-    // 失败（Chromium 对大 blob 可能抛 NotAllowedError）再走下载降级
-    const SHARE_MAX_ONE = 500 * 1024 * 1024;
-    const SHARE_MAX_TOTAL = 500 * 1024 * 1024;
+    // 说明：Chromium 的 navigator.share 对大 blob 有未公开的内部上限（远低于 500MB，
+    // 机型相关），超限直接抛 NotAllowedError、面板根本不打开——网页改不了这个上限。
+    // 因此：仅当文件较小时尝试系统分享；超限/失败一律走「下载」路线（ZIP 打包或逐个 PDF），
+    // 再到 LocalSend App 里手动发送。
+    const SHARE_TRY_ONE = 50 * 1024 * 1024;    // 单文件 ≤50MB 才尝试系统分享
+    const SHARE_TRY_TOTAL = 80 * 1024 * 1024;  // 合计 ≤80MB 才尝试系统分享
     async function shareFiles(recs) {
       if (!recs || !recs.length) return;
       const status = document.getElementById('status');
       const files = recs.map(r => new File([r.blob], r.name, { type: 'application/pdf' }));
       const totalBytes = files.reduce((s, f) => s + f.size, 0);
-      const tooBig = files.some(f => f.size > SHARE_MAX_ONE) || totalBytes > SHARE_MAX_TOTAL;
+      const tryShare = !files.some(f => f.size > SHARE_TRY_ONE) && totalBytes <= SHARE_TRY_TOTAL;
       let shareErr = null;
       const blocked = !!(navigator.canShare && navigator.canShare({ files }) === false);
-      if (navigator.share && !blocked) {
+      if (navigator.share && !blocked && tryShare) {
         try {
           await navigator.share({ files, title: recs.length === 1 ? recs[0].name : recs.length + ' 个 PDF' });
           for (const r of recs) await dbPut({ ...r, sent: true });
@@ -894,24 +898,57 @@
           shareErr = e;
         }
       }
-      // 降级下载；文件较大时把合计大小写进原因，方便判断是否为大小问题
-      const sizeNote = tooBig
-        ? '所选文件合计 ' + fmtSize(totalBytes) + '，超过 ' + fmtSize(SHARE_MAX_TOTAL) + ' 上限'
-        : (shareErr && shareErr.name === 'NotAllowedError'
-            ? '系统分享面板拒绝了本次请求（NotAllowedError，合计 ' + fmtSize(totalBytes) + '，可能是文件过大）'
-            : (shareErr ? escapeHtml(shareErr.message || shareErr.name || '未知') : ''));
-      const wantDownload = await askConfirm({
-        title: '无法调起系统分享面板',
-        message: '当前无法直接分享这些文件。' +
-          (sizeNote ? '<br>原因：' + sizeNote : '') +
-          '<br><br>是否改为<b>下载到本机</b>？下载后可在 LocalSend 里手动选择发送。',
-        okText: '直接下载', cancelText: '取消'
+      // 系统分享不可用/超限/失败 → 让用户选下载方式
+      const reason = !tryShare
+        ? '所选文件合计 ' + fmtSize(totalBytes) + '，超出系统分享面板可稳定处理的大小（约 ' +
+          fmtSize(SHARE_TRY_TOTAL) + ' 以内）'
+        : '系统分享面板拒绝了本次请求' +
+          (shareErr ? '（' + escapeHtml(shareErr.name || '未知') + '）' : '');
+      const pick = await askConfirm({
+        title: '改用下载方式发送',
+        message: '当前无法直接分享这些文件。<br>原因：' + reason +
+          '<br><br>推荐<b>打包成一个 ZIP</b>下载（在 LocalSend 里一次发完）；' +
+          '也可以直接下载多个 PDF。<br>下载后打开 LocalSend 手动选择发送即可。',
+        okText: '打包 ZIP 下载', extraText: '直接下载 PDF', cancelText: '取消'
       });
-      if (!wantDownload) { status.textContent = '已取消，未下载。'; return; }
-      for (const r of recs) { download(r); await new Promise(res => setTimeout(res, 400)); }
-      status.textContent = '已下载 ' + recs.length + ' 个文件到本机，可在 LocalSend 中手动发送。';
+      if (pick === 'extra') {
+        for (const r of recs) { download(r); await new Promise(res => setTimeout(res, 400)); }
+        status.textContent = '已下载 ' + recs.length + ' 个文件到本机，可在 LocalSend 中手动发送。';
+      } else if (pick === true) {
+        await downloadAsZip(recs);
+        status.textContent = '已打包下载 ZIP（含 ' + recs.length + ' 个 PDF），可在 LocalSend 中手动发送。';
+      } else {
+        status.textContent = '已取消，未下载。';
+        return;
+      }
       for (const r of recs) await dbPut({ ...r, sent: true });
       renderLibrary();
+    }
+
+    // 多个 PDF 打包成一个 ZIP 下载（PDF 本身已压缩，用 STORE 不重复压缩，最快且不会变大）
+    async function downloadAsZip(recs) {
+      if (typeof JSZip === 'undefined') {
+        // JSZip 缺失时退回逐个下载
+        for (const r of recs) { download(r); await new Promise(res => setTimeout(res, 400)); }
+        return;
+      }
+      const zip = new JSZip();
+      const used = new Set();
+      for (const r of recs) {
+        let n = r.name || '未命名.pdf';
+        while (used.has(n)) n = n.replace(/\.pdf$/i, '') + '_1.pdf';
+        used.add(n);
+        zip.file(n, r.blob);
+      }
+      const out = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+      const base = recs.length === 1
+        ? recs[0].name.replace(/\.pdf$/i, '')
+        : ('PDF合集_' + recs.length + '个');
+      const url = URL.createObjectURL(out);
+      const a = document.createElement('a');
+      a.href = url; a.download = base + '.zip';
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
     }
 
     function download(rec) {
@@ -1208,9 +1245,10 @@
       const b = BOOKS[+$('#legadoBookSel').value];
       if(!b) return;
       const bookUrl = b.bookUrl || b.url;
-      // 重新读取：重置进度条、提示、坏图重下按钮、生成按钮
+      // 重新读取：重置进度条、提示（含上次「已完成」类提示）、坏图重下按钮、生成按钮
       $('#legadoBarWrap').style.display='none';
       $('#legadoProgressText').textContent='';
+      setLegadoStatus('');
       $('#btnReDL').style.display='none';
       $('#btnBuild').disabled=false; legadoHideCtrl();
       try{
