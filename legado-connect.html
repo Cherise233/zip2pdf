@@ -132,23 +132,25 @@ async function loadChapters(){
   }catch(e){ setStatus('读取章节失败：'+e.message); }
 }
 
-// 从章节正文提取图片 URL（处理 JSON 包裹 + \u003c 转义 + 裸 HTML 三种情况）
-// 注意：legado 的 src 形如 src="URL,{"headers":{...}}"，URL 内含逗号分隔的 JSON，
-//       且 JSON 里有双引号 —— 必须先把整个 src 值（含内层引号）抓全，再按首个逗号切出纯图片 URL。
+// 从章节正文提取图片（处理 JSON 包裹 + \u003c 转义 + 裸 HTML 三种情况）
+// 关键：返回【完整 src】（URL + ,{"headers":{...}} JSON 后缀）。
+// legado 的 /image 接口把 path 参数原样交给 ImageProvider，内部经 AnalyzeUrl 解析，
+// 恰恰要靠这段 JSON 后缀拿到 Referer/Cookie —— 切掉它 legado 就裸请求图床，防盗链 403 → 返回错误占位图。
+// 同时保留干净 url 仅用于显示。
 function extractImages(text){
   let html = text;
   try{ const o = JSON.parse(text); if(o && typeof o.data==='string') html = o.data; }catch(_){}
   html = html.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"')
              .replace(/&#39;/g,"'").replace(/&amp;/g,'&');
-  const urls = [];
+  const imgs = [];
   // 抓全 src="..."（允许值内含双引号），要求闭合引号后紧跟 >（legado 无后续属性）
   const re = /\ssrc\s*=\s*"([\s\S]*?)"\s*>/gi; let m;
   while((m = re.exec(html))){
-    const src = m[1];
-    const comma = src.indexOf(',');
-    urls.push(comma>=0 ? src.slice(0,comma) : src);
+    const full = m[1];
+    const comma = full.indexOf(',');
+    imgs.push({ url: comma>=0 ? full.slice(0,comma) : full, src: full });
   }
-  return urls;
+  return imgs;
 }
 
 // blob -> JPEG dataURL（canvas 不污染，因为 blob 同源）
@@ -184,12 +186,17 @@ async function mapLimit(items, limit, fn){
   return out;
 }
 
-// 自动探测 /image 参数顺序：url=图片地址&path=书籍源地址 是标准，部分版本反过来。
-// 首张成功后记住正确顺序，后续不再试错。
-let IMG_ORDER = null; // null=未知, false=url=picUrl/path=bookUrl, true=反向
-async function fetchOne(bookUrl, picUrl, reverse){
-  const [u1, p1] = reverse ? [bookUrl, picUrl] : [picUrl, bookUrl];
-  const u = '/image?url='+encodeURIComponent(u1)+'&path='+encodeURIComponent(p1);
+// /image 接口（已核对 legado 源码 BookController.getImg）：
+//   url  = bookUrl（书籍地址，legado 用它在数据库查书+书源）
+//   path = 图片 src（完整值，含 ,{headers} JSON，legado 内部 AnalyzeUrl 会解析出 Referer）
+//   width= 解码宽度（默认 640 太糊，显式传大值）
+// 下载失败时 legado 不报错，而是返回一张 errorBitmap 错误占位图（HTTP 200、image 类型），
+// 无法靠状态码识别 —— 用字节数阈值识别占位图（漫画页不可能 <8KB）。
+const PLACEHOLDER_BYTES = 8192;
+async function fetchImage(bookUrl, fullSrc){
+  const u = '/image?url='+encodeURIComponent(bookUrl)
+          +'&path='+encodeURIComponent(fullSrc)
+          +'&width=1440';
   let res;
   try{ res = await api(u); }
   catch(e){ throw new Error('请求失败: '+e.message); }
@@ -199,23 +206,14 @@ async function fetchOne(bookUrl, picUrl, reverse){
   }
   const ct = res.headers.get('content-type') || '';
   const blob = await res.blob();
-  if(!/image|octet-stream|binary|application\/pdf/.test(ct)){
+  if(!/image|octet-stream|binary/.test(ct)){
     const t = await blob.text().catch(()=> '');
     throw new Error('非图片 ct='+ct+' body='+t.slice(0,100));
   }
-  return await blobToJpeg(blob);
-}
-async function fetchImage(bookUrl, picUrl){
-  const orders = IMG_ORDER === null ? [false, true] : [IMG_ORDER];
-  let lastErr;
-  for(const rev of orders){
-    try{
-      const im = await fetchOne(bookUrl, picUrl, rev);
-      if(IMG_ORDER === null) IMG_ORDER = rev;
-      return im;
-    }catch(e){ lastErr = e; }
+  if(blob.size < PLACEHOLDER_BYTES){
+    throw new Error('__PLACEHOLDER__'); // legado 错误占位图（防盗链 403 等），跳过
   }
-  throw lastErr;
+  return await blobToJpeg(blob);
 }
 
 async function build(){
@@ -248,15 +246,20 @@ async function build(){
     // 阶段二：逐张取图，实时更新进度
     setStatus('开始取图，共 '+total+' 张…');
     const pages = [];
-    let done = 0, failed = 0;
+    let done = 0, failed = 0, placeholders = 0, lastErr = '';
     for(const {ci, urls} of chaptersData){
-      const imgs = await mapLimit(urls, 4, async (picUrl)=>{
+      const imgs = await mapLimit(urls, 4, async (img)=>{
         try{
-          const im = await fetchImage(bookUrl, picUrl);
+          const im = await fetchImage(bookUrl, img.src);
           done++; setProg(done/total);
           return im;
         }catch(e){
-          failed++; done++; setProg(done/total);
+          done++; setProg(done/total);
+          if(e.message === '__PLACEHOLDER__'){
+            placeholders++;
+            return null;
+          }
+          failed++; lastErr = e.message;
           setStatus('第'+(ci+1)+'话 1 张取图失败：'+e.message);
           return null;
         }
@@ -265,7 +268,9 @@ async function build(){
     }
 
     if(!pages.length){
-      setStatus('全部图片取图失败（见上方"取图失败"报错）。\n常见：/image 参数顺序仍不对，或该图源 legado 也取不到。\n把具体报错发我即可定位。');
+      setStatus('全部图片取图失败。\n'
+        + (placeholders ? '其中 '+placeholders+' 张是 legado 错误占位图（防盗链 403 等）。\n' : '')
+        + '最后错误：'+ (lastErr || '无') + '\n把这段报错发我即可定位。');
       $('#btnBuild').disabled=false; return;
     }
 
@@ -283,7 +288,10 @@ async function build(){
     builtDoc = doc;
     const name = bookName.replace(/[\\/:*?"<>|]/g,'_');
     builtDoc._fname = name + '_' + idxs.length + '话.pdf';
-    setStatus('✅ 完成！共 '+pages.length+' 张，失败 '+failed+' 张。\n点击底部按钮保存：'+builtDoc._fname);
+    setStatus('✅ 完成！共 '+pages.length+' 张'
+      + (placeholders ? '，跳过 '+placeholders+' 张错误占位图' : '')
+      + (failed ? '，失败 '+failed+' 张' : '')
+      + '。\n点击底部按钮保存：'+builtDoc._fname);
     $('#fab').textContent = '⬇️ 保存 '+builtDoc._fname;
   }catch(e){ setStatus('生成出错：'+e.message); }
   finally{ $('#btnBuild').disabled = false; }
