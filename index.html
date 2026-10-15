@@ -1118,20 +1118,34 @@
           acc += pages.length;
           pages.forEach(p => merged.addPage(p));
         }
-        // 目录页：用 canvas 渲染中文（避免 pdf-lib 标准字体不支持中文）
-        const tocEntries = recs.map((r, k) => ({ label: tocLabel(r), page: startIdx[k] + 2 }));
-        const toc = await makeTocPage(tocEntries);
-        const tocImg = await merged.embedPng(toc.bytes);
-        const tocPage = merged.insertPage(0, [toc.W, toc.H]);
-        tocPage.drawImage(tocImg, { x: 0, y: 0, width: toc.W, height: toc.H });
-
-        // 写入 PDF 书签/大纲（Kindle、KOReader 侧边「目录」读的就是这个）
-        // 页码 +1：第 0 页是上面插入的目录页
+        // ① 优先写 PDF 书签/大纲（Kindle、KOReader 侧边的目录）。
+        //    这时还没有首页目录页，条目页码就是 startIdx[k]（0 基）
         let outlineOk = false;
         try {
           outlineOk = addPdfOutline(merged,
-            recs.map((r, k) => ({ title: tocLabel(r), page: startIdx[k] + 1 })));
-        } catch (oe) { outlineOk = false; }
+            recs.map((r, k) => ({ title: tocLabel(r), page: startIdx[k] })));
+        } catch (oe) {
+          outlineOk = false;
+          // 清掉可能写了一半的大纲，避免留下指向错误页码的残缺目录
+          try {
+            merged.catalog.delete(PDFLib.PDFName.of('Outlines'));
+            merged.catalog.delete(PDFLib.PDFName.of('PageMode'));
+          } catch (_) {}
+        }
+
+        // ② 仅当书签写入失败，才退回「首页画一张目录页」的兜底方案。
+        //    插入后目录页占第 1 页，正文整体后移，页码显示为 startIdx[k] + 2（1 基）
+        let tocOk = false;
+        if (!outlineOk) {
+          try {
+            const tocEntries = recs.map((r, k) => ({ label: tocLabel(r), page: startIdx[k] + 2 }));
+            const toc = await makeTocPage(tocEntries);
+            const tocImg = await merged.embedPng(toc.bytes);
+            const tocPage = merged.insertPage(0, [toc.W, toc.H]);
+            tocPage.drawImage(tocImg, { x: 0, y: 0, width: toc.W, height: toc.H });
+            tocOk = true;
+          } catch (te) { tocOk = false; }
+        }
 
         const out = await merged.save();
         const blob = new Blob([out], { type: 'application/pdf' });
@@ -1147,10 +1161,12 @@
           createdAt: new Date().toLocaleString('zh-CN'), sent: false, blob
         });
         renderLibrary();
+        const dirNote = outlineOk ? '，含书签目录'
+          : (tocOk ? '，⚠️ 书签目录写入失败，已改用首页目录页'
+                   : '，⚠️ 书签目录与首页目录页都未生成');
         st.textContent =
           '✅ 已合并为 1 个 PDF：' + name + '（已存入「我的 PDF 库」'
-          + (outlineOk ? '，含书签目录' : '，⚠️ 书签目录写入失败')
-          + '，可打开 LocalSend 分享）';
+          + dirNote + '，可打开 LocalSend 分享）';
       } catch (e) {
         st.textContent = '合并失败：' + e.message;
       }
