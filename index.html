@@ -221,6 +221,7 @@
       <div class="bulk-top">
         <button class="btn small gray" id="fileAll">全选</button>
         <span class="selcount" id="fileCount">已选 0 个</span>
+        <span class="selcount" id="fileSize" style="margin-left:6px"></span>
       </div>
       <div class="bulk-ops">
         <button class="btn small" id="fileMerge">合并</button>
@@ -700,7 +701,12 @@
       const bulk = document.getElementById(prefix + 'Bulk');
       const count = document.getElementById(prefix + 'Count');
       if (!bulk || !count) return;
-      if (!total) { bulk.classList.remove('show'); return; }
+      if (!total) {
+        bulk.classList.remove('show');
+        const sz0 = document.getElementById('fileSize');
+        if (sz0) sz0.textContent = '';
+        return;
+      }
       bulk.classList.add('show');
       const set = kind === 'up' ? selUploads : kind === 'file' ? selFiles : selPdfs;
       const n = set.size;
@@ -718,8 +724,26 @@
         document.getElementById('fileDownload').disabled = n === 0;
         document.getElementById('fileDelete').disabled = n === 0;
         document.getElementById('fileRename').disabled = n !== 1;
+        updateFileSelectedSize();          // 刷新「总大小」
       } else {
         document.getElementById('upDelete').disabled = n === 0;
+      }
+    }
+
+    // 文件库：显示已选文件合计大小；超过 FILE_SIZE_WARN 标橙色（系统分享面板在此之上易失败）
+    const FILE_SIZE_WARN = 50 * 1024 * 1024;
+    async function updateFileSelectedSize() {
+      const el = document.getElementById('fileSize');
+      if (!el) return;
+      if (!selFiles.size) { el.textContent = ''; el.style.color = ''; return; }
+      try {
+        const list = await dbAllFiles();
+        const total = list.filter(r => selFiles.has(r.id))
+                          .reduce((s, r) => s + (r.size || 0), 0);
+        el.textContent = '· 共 ' + fmtSize(total);
+        el.style.color = total > FILE_SIZE_WARN ? '#ea580c' : '';
+      } catch (e) {
+        el.textContent = '';
       }
     }
 
@@ -1101,6 +1125,14 @@
         const tocPage = merged.insertPage(0, [toc.W, toc.H]);
         tocPage.drawImage(tocImg, { x: 0, y: 0, width: toc.W, height: toc.H });
 
+        // 写入 PDF 书签/大纲（Kindle、KOReader 侧边「目录」读的就是这个）
+        // 页码 +1：第 0 页是上面插入的目录页
+        let outlineOk = false;
+        try {
+          outlineOk = addPdfOutline(merged,
+            recs.map((r, k) => ({ title: tocLabel(r), page: startIdx[k] + 1 })));
+        } catch (oe) { outlineOk = false; }
+
         const out = await merged.save();
         const blob = new Blob([out], { type: 'application/pdf' });
         // 命名：同一本书且都有话号 → 漫画名_范围话.pdf（与下载命名一致）；否则兜底
@@ -1116,10 +1148,54 @@
         });
         renderLibrary();
         st.textContent =
-          '✅ 已合并为 1 个 PDF：' + name + '（已存入「我的 PDF 库」，可打开 LocalSend 分享）';
+          '✅ 已合并为 1 个 PDF：' + name + '（已存入「我的 PDF 库」'
+          + (outlineOk ? '，含书签目录' : '，⚠️ 书签目录写入失败')
+          + '，可打开 LocalSend 分享）';
       } catch (e) {
         st.textContent = '合并失败：' + e.message;
       }
+    }
+
+    // ================= PDF 书签 / 大纲（/Outlines）=================
+    // Kindle、KOReader 及多数阅读器侧边的「目录」读的是 PDF 内部的 /Outlines 树，
+    // 与首页那张画出来的目录页是两回事。pdf-lib 没有高级 API，这里手动构造：
+    //   Catalog /Outlines → Outlines 根 → 各条目（Title / Parent / Prev / Next / Dest）
+    // 中文标题必须用 PDFHexString（UTF-16BE），否则会乱码。
+    function addPdfOutline(doc, entries) {
+      const P = PDFLib;
+      if (!P || !P.PDFName || !P.PDFHexString) return false;
+      const ctx = doc.context;
+      const pages = doc.getPages();
+
+      // 先建根字典拿到 ref，好让各条目的 Parent 指向它
+      const root = ctx.obj({ Type: P.PDFName.of('Outlines') });
+      const rootRef = ctx.register(root);
+
+      const items = [];
+      for (const e of entries) {
+        const page = pages[e.page];
+        if (!page) continue;
+        const dict = ctx.obj({
+          Title: P.PDFHexString.fromText(String(e.title || '')),
+          Parent: rootRef,
+          Dest: [page.ref, P.PDFName.of('Fit')],   // 点击跳到该页并整页适应窗口
+        });
+        items.push({ dict, ref: ctx.register(dict) });
+      }
+      if (!items.length) return false;
+
+      // 串成双向链表（Prev / Next）
+      for (let i = 0; i < items.length; i++) {
+        if (i > 0) items[i].dict.set(P.PDFName.of('Prev'), items[i - 1].ref);
+        if (i < items.length - 1) items[i].dict.set(P.PDFName.of('Next'), items[i + 1].ref);
+      }
+      root.set(P.PDFName.of('First'), items[0].ref);
+      root.set(P.PDFName.of('Last'), items[items.length - 1].ref);
+      root.set(P.PDFName.of('Count'), P.PDFNumber.of(items.length));
+
+      doc.catalog.set(P.PDFName.of('Outlines'), rootRef);
+      doc.catalog.set(P.PDFName.of('PageMode'), P.PDFName.of('UseOutlines')); // 打开即显示目录栏
+      return true;
     }
 
     // 目录条目标签：有话号 → 第X话；否则用文件名（去 .pdf）
