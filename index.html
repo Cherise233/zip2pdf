@@ -18,7 +18,7 @@
     p.tip { text-align: center; color: #6b7280; font-size: 13px; margin-bottom: 20px; }
     .card { background: #fff; border-radius: 16px; padding: 24px;
       max-width: 480px; margin: 0 auto 20px; box-shadow: 0 4px 12px rgba(0,0,0,.08); }
-    #fileInput, #imgInput, #dbImgInput { display: none; }
+    #fileInput, #imgInput { display: none; }
     .btn { display: inline-block; background: #4f46e5; color: #fff; border: none;
       border-radius: 12px; padding: 12px 18px; font-size: 15px; cursor: pointer;
       white-space: nowrap; }
@@ -107,68 +107,15 @@
     .ch span { font-size: 13px; flex: 1; min-width: 0; }
     .legado-hint { font-size: 12px; color: #9ca3af; margin-top: 8px; line-height: 1.6; }
     #legadoStatus { margin-top: 10px; color: #374151; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
-
-    /* ============ 顶部标签页 ============ */
-    .tabs { display: flex; gap: 8px; margin: 0 auto 18px; max-width: 480px; }
-    .tabs .tab { flex: 1 1 0; padding: 11px 12px; font-size: 14px; border-radius: 12px;
-      border: 1px solid #e5e7eb; background: #fff; color: #4b5563; cursor: pointer; font-family: inherit; }
-    .tabs .tab.active { background: #4f46e5; color: #fff; border-color: #4f46e5; font-weight: 600;
-      box-shadow: 0 4px 12px rgba(79,70,229,.25); }
-
-    /* 主页面顶部去糊状态横幅 */
-    .dbbanner { display: flex; align-items: center; gap: 10px; max-width: 480px; margin: 0 auto 14px;
-      padding: 10px 14px; border-radius: 12px; font-size: 14px; cursor: pointer;
-      background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
-    .dbbanner.off { background: #f3f4f6; border-color: #e5e7eb; color: #6b7280; }
-    .dbbanner .dbb-main { display: flex; flex-direction: column; line-height: 1.35; min-width: 0; }
-    .dbbanner #dbBannerSub { font-size: 12px; opacity: .75; }
-    .dbbanner .dbb-go { margin-left: auto; font-weight: 600; color: #4f46e5; white-space: nowrap; }
     .dbbanner.off .dbb-go { color: #6b7280; }
 
-    /* ============ 去糊设置（Kindle 漫画去糊）============ */
-    .ksec { margin: 12px 0; padding-top: 12px; border-top: 1px solid #e5e7eb; }
-    .ksec:first-of-type { border-top: none; padding-top: 0; }
-    .kswitch { display: flex; align-items: center; gap: 10px; font-size: 14px; color: #374151; }
-    .kswitch input { width: 20px; height: 20px; accent-color: #4f46e5; }
-    .krow { margin: 12px 0; }
-    .klabel { display: flex; justify-content: space-between; font-size: 13px; color: #374151; margin-bottom: 5px; }
-    .klabel b { color: #4f46e5; font-weight: 600; }
-    .ktip { font-size: 12px; color: #9ca3af; margin: -2px 0 6px; line-height: 1.45; }
-    .krow.disabled .klabel, .krow.disabled .ktip { opacity: .45; }
-    .kprow { display: flex; align-items: center; gap: 10px; }
-    .kprow input[type=number] { flex: 0 0 72px; width: 72px; text-align: center;
-      border: 1px solid #d1d5db; border-radius: 8px; padding: 8px 6px; font-family: inherit; font-size: 13px; }
-    .kprow input[type=range] { flex: 1 1 0; min-width: 0; accent-color: #4f46e5; }
-    .krow.disabled .kprow input { opacity: .5; pointer-events: none; }
-    .kprev { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
-    .kprev .pcell { display: flex; flex-direction: column; min-width: 0; }
-    .kprev canvas { width: 100%; height: auto; border-radius: 10px; border: 1px solid #e5e7eb; display: block; background: #fff; }
-    .kprev .ptitle { font-size: 12px; color: #6b7280; text-align: center; margin-top: 6px; }
-    .kcap { font-size: 12px; color: #9ca3af; text-align: center; margin-top: 8px; }
-    /* 库条目缩略图 */
-    .item .thumb { width: 54px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid #e5e7eb;
-      background: #f3f4f6; flex: none; margin-right: 10px; }
-    .item { display: flex; align-items: flex-start; gap: 0; }
-    .item .body { flex: 1 1 auto; min-width: 0; }
-    .item .pickrow, .item .meta { margin-left: 0; }
   </style>
 </head>
 <body>
   <h1>📷 ZIP 转 PDF</h1>
   <p class="tip">支持 jpg / png / webp / bmp / gif / avif / svg<br>文件夹按顺序对应话数 · 可合并为一个 PDF · 可重命名</p>
 
-  <div class="tabs">
-    <button class="tab active" id="tabMainBtn" data-tab="main">🏠 主页面</button>
-    <button class="tab" id="tabDeblurBtn" data-tab="deblur">🛠️ 去糊设置</button>
-  </div>
-
-  <div id="tabMain">
-    <div id="dbBanner" class="dbbanner" title="点击调整去糊参数" onclick="switchTab('deblur')">
-      <span id="dbBannerIcon">✅</span>
-      <span class="dbb-main"><b id="dbBannerText">去糊已启用</b><span id="dbBannerSub"></span></span>
-      <span class="dbb-go">去设置 →</span>
-    </div>
-    <div class="card">
+  <div class="card">
     <input type="file" id="fileInput" accept=".zip,application/zip,application/x-zip-compressed">
     <input type="file" id="imgInput" accept="image/*" multiple>
     <div class="row" style="margin-bottom:14px">
@@ -316,57 +263,6 @@
         <button class="btn small gray" id="pdfDownload">下载</button>
         <button class="btn small danger" id="pdfDelete">删除</button>
       </div>
-    </div>
-  </div>
-
-  </div><!-- /#tabMain -->
-
-  <div id="tabDeblur" style="display:none">
-    <div class="card">
-      <h2>🛠️ Kindle 漫画去糊</h2>
-      <div class="legado-hint" style="margin-top:0">开启后，ZIP / 图片 / Legado 生成 PDF 前会先按下方参数去糊（重采样到设备宽度 + 锐化 + 对比度等），更适合墨水屏。关闭则保持原图，下方控件变灰。</div>
-
-      <div class="ksec">
-        <label class="kswitch"><input type="checkbox" id="dbEnable" checked> 启用去糊</label>
-      </div>
-
-      <div class="ksec" id="kBody">
-        <label>目标硬件（决定重采样宽度）</label>
-        <select id="dbDevice" class="sel-select" style="margin-bottom:10px">
-          <option value="1072">Kindle Basic 6″ · 1072px</option>
-          <option value="1236" selected>Kindle Paperwhite 6.8″ · 1236px</option>
-          <option value="1264">Kindle Oasis 7″ · 1264px</option>
-          <option value="1860">Kindle Scribe 10.2″ · 1860px</option>
-          <option value="0">自定义宽度（用下方滑块）</option>
-          <option value="-1">保留原图尺寸（不缩放）</option>
-        </select>
-        <div id="kParams"></div>
-
-        <label style="display:block;margin:14px 0 6px">开关</label>
-        <label class="opt"><input type="checkbox" id="dbUpscale" checked> 允许放大（原图小于目标宽度时放大，让小字更清晰）</label>
-        <label class="opt"><input type="checkbox" id="dbDither" checked> 灰度抖动（量化灰阶时减少断层，黑白屏更平滑）</label>
-        <label class="opt"><input type="checkbox" id="dbPurebw"> 纯黑白 1-bit（文字/线稿最锐，但丢失灰阶）</label>
-      </div>
-
-      <div class="ksec">
-        <label>预览（上传一张图看去糊效果，不影响实际转换）</label>
-        <input type="file" id="dbImgInput" accept="image/*">
-        <div style="display:flex;gap:8px;margin:8px 0">
-          <button class="btn small gray" id="dbPick" style="flex:1" onclick="document.getElementById('dbImgInput').click()">测试</button>
-          <button class="btn small gray" id="dbPickFromLib" style="flex:1">📄 抽取文件图片</button>
-        </div>
-        <div class="kprev">
-          <div class="pcell"><canvas id="dbPrevOrig"></canvas><div class="ptitle">原图</div></div>
-          <div class="pcell"><canvas id="dbPrevProc"></canvas><div class="ptitle">去糊后（实时）</div></div>
-        </div>
-        <div class="kcap">左右对比：左原图，右去糊后（调参即时更新）</div>
-      </div>
-
-      <div class="row" style="margin-top:14px">
-        <button class="btn gray" id="dbReset" style="flex:1">恢复默认</button>
-        <button class="btn gray" id="dbSave" style="flex:1">保存为默认</button>
-      </div>
-      <div id="dbStatus" class="kcap" style="color:#4f46e5;text-align:left;margin-top:10px"></div>
     </div>
   </div>
 
@@ -531,12 +427,11 @@
             g.fillStyle = '#ffffff';
             g.fillRect(0, 0, w, h);
             g.drawImage(img, 0, 0, w, h);
-            let work = dbApply(c);   // Kindle 漫画去糊（关闭时返回原图）
-            const dataUrl = work.toDataURL('image/jpeg', JPEG_QUALITY);
+            const dataUrl = c.toDataURL('image/jpeg', JPEG_QUALITY);
             if (!dataUrl || dataUrl.length < 200) {
               rej(new Error('图片过大，浏览器无法处理'));
             } else {
-              res({ dataUrl, width: work.width, height: work.height, canvas: work });
+              res({ dataUrl, width: w, height: h });
             }
           } catch (err) { rej(err); }
         };
@@ -548,165 +443,11 @@
       });
     }
 
-    // ================= Kindle 漫画去糊核心 =================
-    function dbClamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
-
-    function dbResizeToWidth(src, targetW, allowUpscale) {
-      const w0 = src.width, h0 = src.height;
-      let tw = targetW;
-      if (!allowUpscale && tw > w0) tw = w0;
-      if (tw === w0) return src;
-      const th = Math.max(1, Math.round(h0 * tw / w0));
-      const c = document.createElement('canvas'); c.width = tw; c.height = th;
-      const g = c.getContext('2d');
-      g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
-      g.drawImage(src, 0, 0, tw, th);
-      return c;
-    }
-
-    // 可分离盒式模糊（灰度，锐化掩模用）
-    function dbBoxBlurGray(src, W, H, r) {
-      const tmp = new Float32Array(W * H), out = new Float32Array(W * H), win = r * 2 + 1;
-      for (let y = 0; y < H; y++) {
-        let s = 0;
-        for (let x = -r; x <= r; x++) s += src[y * W + dbClamp(x, 0, W - 1)];
-        for (let x = 0; x < W; x++) {
-          tmp[y * W + x] = s / win;
-          const a = src[y * W + dbClamp(x + r + 1, 0, W - 1)], b = src[y * W + dbClamp(x - r, 0, W - 1)];
-          s += a - b;
-        }
-      }
-      for (let x = 0; x < W; x++) {
-        let s = 0;
-        for (let y = -r; y <= r; y++) s += tmp[dbClamp(y, 0, H - 1) * W + x];
-        for (let y = 0; y < H; y++) {
-          out[y * W + x] = s / win;
-          const a = tmp[dbClamp(y + r + 1, 0, H - 1) * W + x], b = tmp[dbClamp(y - r, 0, H - 1) * W + x];
-          s += a - b;
-        }
-      }
-      return out;
-    }
-
-    // 增强：亮度 → 灰度混合 → 对比度 → 伽马 → 锐化 → 抖动/黑白
-    function dbEnhance(canvas, p) {
-      const W = canvas.width, H = canvas.height;
-      const g = canvas.getContext('2d');
-      let img = g.getImageData(0, 0, W, H); let d = img.data;
-      const b = (p.brightness || 0) / 100 * 255;
-      const c = (p.contrast || 0) / 100;
-      const cf = (259 * (c * 255 + 255)) / (255 * (259 - c * 255));
-      const grayMix = dbClamp((p.grayscale || 0) / 100, 0, 1);
-      for (let i = 0; i < d.length; i += 4) {
-        let r = d[i], gr = d[i + 1], bl = d[i + 2];
-        if (grayMix > 0) { const lum = 0.299 * r + 0.587 * gr + 0.114 * bl; r += (lum - r) * grayMix; gr += (lum - gr) * grayMix; bl += (lum - bl) * grayMix; }
-        if (b) { r += b; gr += b; bl += b; }
-        if (c) { r = cf * (r - 128) + 128; gr = cf * (gr - 128) + 128; bl = cf * (bl - 128) + 128; }
-        d[i] = dbClamp(r, 0, 255); d[i + 1] = dbClamp(gr, 0, 255); d[i + 2] = dbClamp(bl, 0, 255);
-      }
-      g.putImageData(img, 0, 0);
-      if (p.gamma && p.gamma !== 1) {
-        const ig = 1 / p.gamma, lut = new Uint8ClampedArray(256);
-        for (let v = 0; v < 256; v++) lut[v] = dbClamp(255 * Math.pow(v / 255, ig), 0, 255);
-        img = g.getImageData(0, 0, W, H); d = img.data;
-        for (let i = 0; i < d.length; i += 4) { d[i] = lut[d[i]]; d[i + 1] = lut[d[i + 1]]; d[i + 2] = lut[d[i + 2]]; }
-        g.putImageData(img, 0, 0);
-      }
-      if (p.sharpen > 0) {
-        const radius = Math.max(1, Math.round(p.sharpen / 40) + 1);
-        img = g.getImageData(0, 0, W, H); d = img.data;
-        const sf = new Float32Array(W * H);
-        for (let i = 0, j = 0; i < d.length; i += 4, j++) sf[j] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-        const blurred = dbBoxBlurGray(sf, W, H, radius);
-        const amount = Math.min(2, p.sharpen / 100);
-        for (let i = 0, j = 0; i < d.length; i += 4, j++) {
-          d[i] = dbClamp(d[i] + (d[i] - blurred[j]) * amount, 0, 255);
-          d[i + 1] = dbClamp(d[i + 1] + (d[i + 1] - blurred[j]) * amount, 0, 255);
-          d[i + 2] = dbClamp(d[i + 2] + (d[i + 2] - blurred[j]) * amount, 0, 255);
-        }
-        g.putImageData(img, 0, 0);
-      }
-      if (p.purebw || p.dither) {
-        const levels = p.purebw ? 2 : 16;
-        img = g.getImageData(0, 0, W, H); d = img.data;
-        const step = 255 / (levels - 1);
-        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-          const i = (y * W + x) * 4;
-          let v = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-          let q = Math.round(v / step) * step; if (q > 255) q = 255; if (q < 0) q = 0;
-          const err = v - q;
-          d[i] = q; d[i + 1] = q; d[i + 2] = q;
-          if (x + 1 < W) d[i + 4] += err * 7 / 16;
-          if (y + 1 < H) { if (x - 1 >= 0) d[i + 4 * W - 4] += err * 3 / 16; d[i + 4 * W] += err * 5 / 16; if (x + 1 < W) d[i + 4 * W + 4] += err * 1 / 16; }
-        }
-        g.putImageData(img, 0, 0);
-      }
-      return canvas;
-    }
-
-    // 读取去糊参数（关闭 / 元素缺失时返回 null → 不去糊）
-    function dbGetParams() {
-      const en = document.getElementById('dbEnable');
-      if (!en || !en.checked) return null;
-      const num = id => { const e = document.getElementById(id); return e ? parseFloat(e.value) : 0; };
-      const chk = id => { const e = document.getElementById(id); return !!(e && e.checked); };
-      return {
-        width: num('dbNum_width'),
-        contrast: num('dbNum_contrast'),
-        gamma: num('dbNum_gamma'),
-        sharpen: num('dbNum_sharpen'),
-        grayscale: num('dbNum_grayscale'),
-        brightness: num('dbNum_brightness'),
-        upscale: chk('dbUpscale'),
-        dither: chk('dbDither'),
-        purebw: chk('dbPurebw'),
-      };
-    }
-
-    // 对绘制好的 canvas 应用去糊（含重采样）。返回（可能）新的 canvas
-    function dbApply(canvas) {
-      if (!canvas) return canvas;
-      const p = dbGetParams();
-      if (!p) return canvas;
-      if (p.width > 0) canvas = dbResizeToWidth(canvas, p.width, p.upscale);
-      return dbEnhance(canvas, p);
-    }
-
-    // 由去糊后的 canvas 生成库列表缩略图（dataURL）
-    function dbMakeThumb(canvas, maxW) {
-      maxW = maxW || 220;
-      const tw = Math.min(maxW, canvas.width);
-      const th = Math.max(1, Math.round(canvas.height * tw / canvas.width));
-      const c = document.createElement('canvas'); c.width = tw; c.height = th;
-      const g = c.getContext('2d');
-      g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
-      g.drawImage(canvas, 0, 0, tw, th);
-      return c.toDataURL('image/jpeg', 0.7);
-    }
-
-    // 主页面顶部去糊状态横幅：随时反映「当前有没有去糊、按什么参数去糊」
-    function updateDbBanner() {
-      const banner = document.getElementById('dbBanner');
-      const enableChk = document.getElementById('dbEnable');
-      if (!banner || !enableChk) return;
-      const on = enableChk.checked;
-      banner.classList.toggle('off', !on);
-      document.getElementById('dbBannerIcon').textContent = on ? '✅' : '⬜';
-      document.getElementById('dbBannerText').textContent = on ? '去糊已启用' : '去糊未启用';
-      const dev = document.getElementById('dbDevice');
-      const devOpt = dev && dev.options && dev.options[dev.selectedIndex];
-      const devTxt = devOpt ? devOpt.textContent : '';
-      document.getElementById('dbBannerSub').textContent = on
-        ? ('ZIP / 图片 / Legado 入库前将按此去糊：' + devTxt + '，点击调整参数')
-        : '上传的图片将保持原图，不做任何去糊，点击去设置';
-    }
-
     async function buildPDF(images, onProgress) {
       const jsPDF = window.jspdf && window.jspdf.jsPDF;
       if (!jsPDF) throw new Error('jsPDF 未加载，请检查 vendor/jspdf.umd.min.js');
       let doc = null;
       const skipped = [];
-      let thumb = null;
       for (let i = 0; i < images.length; i++) {
         onProgress(i);
         let out;
@@ -720,14 +461,13 @@
         const orient = out.width >= out.height ? 'landscape' : 'portrait';
         if (!doc) {
           doc = new jsPDF({ orientation: orient, unit: 'px', format: [out.width, out.height] });
-          thumb = dbMakeThumb(out.canvas);   // 首图缩略图，供 PDF 库预览
         } else {
           doc.addPage([out.width, out.height], orient);
         }
         doc.addImage(out.dataUrl, 'JPEG', 0, 0, out.width, out.height);
       }
       if (!doc) throw new Error('没有可用的图片（格式可能全部不被支持）');
-      return { blob: doc.output('blob'), skipped, thumb };
+      return { blob: doc.output('blob'), skipped };
     }
 
     // 用一组 {dataUrl,w,h} 页面生成 A4 PDF blob（供 legado 单话 / 重下重建使用）
@@ -817,12 +557,12 @@
 
         if (merge) {
           const allImages = groups.flatMap(g => g.images);
-          const { blob: pdfBlob, skipped, thumb } = await buildPDF(allImages, (i) => {
+          const { blob: pdfBlob, skipped } = await buildPDF(allImages, (i) => {
             setProgress(15 + (i + 1) / allImages.length * 85, '转换图片 ' + (i + 1) + '/' + allImages.length);
           });
           allSkipped = skipped;
           await dbPut({ id: Date.now() + '', name: `${baseName}.pdf`, size: pdfBlob.size,
-            createdAt: new Date().toLocaleString('zh-CN'), sent: false, blob: pdfBlob, thumb });
+            createdAt: new Date().toLocaleString('zh-CN'), sent: false, blob: pdfBlob });
           setProgress(100, '完成 ✔');
           status.textContent = `已合并为 1 个 PDF（共 ${allImages.length - skipped.length} 页）` + skippedNote(skipped);
           await addUpload({ name: file.name, size: file.size, kind: 'zip',
@@ -834,14 +574,14 @@
             const pdfName = startChapter !== null && groups.length > 1
               ? `第${startChapter + gi}话.pdf`
               : (groups.length > 1 ? `${baseName}-${gi + 1}.pdf` : `${baseName}.pdf`);
-            const { blob: pdfBlob, skipped, thumb } = await buildPDF(g.images, () => {
+            const { blob: pdfBlob, skipped } = await buildPDF(g.images, () => {
               convDone++;
               setProgress(15 + convDone / totalImages * 85, '转换中 ' + convDone + '/' + totalImages +
                 '（第 ' + (gi + 1) + '/' + groups.length + ' 个 PDF）');
             });
             allSkipped = allSkipped.concat(skipped);
             await dbPut({ id: Date.now() + '-' + gi, name: pdfName, size: pdfBlob.size,
-              createdAt: new Date().toLocaleString('zh-CN'), sent: false, blob: pdfBlob, thumb });
+              createdAt: new Date().toLocaleString('zh-CN'), sent: false, blob: pdfBlob });
             renderLibrary();
           }
           setProgress(100, '全部完成 ✔');
@@ -873,14 +613,14 @@
       try {
         files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
         const items = files.map(f => ({ name: f.name, async: () => Promise.resolve(f) }));
-        const { blob: pdfBlob, skipped, thumb } = await buildPDF(items, (i) => {
+        const { blob: pdfBlob, skipped } = await buildPDF(items, (i) => {
           setProgress((i + 1) / items.length * 100, '转换图片 ' + (i + 1) + '/' + items.length);
         });
         const d = new Date();
         const pad = n => String(n).padStart(2, '0');
         await dbPut({ id: 'img-' + Date.now(),
           name: `图片_${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}.pdf`,
-          size: pdfBlob.size, createdAt: d.toLocaleString('zh-CN'), sent: false, blob: pdfBlob, thumb });
+          size: pdfBlob.size, createdAt: d.toLocaleString('zh-CN'), sent: false, blob: pdfBlob });
         setProgress(100, '完成 ✔');
         status.textContent = `${items.length - skipped.length} 张图已合成 1 个 PDF` + skippedNote(skipped);
         await addUpload({ name: files.length + ' 张图片', size: totalBytes, kind: 'images',
@@ -1025,18 +765,14 @@
         const div = document.createElement('div');
         const on = selPdfs.has(rec.id);
         div.className = 'item' + (on ? ' sel' : '');
-        const thumbImg = rec.thumb ? '<img class="thumb" src="' + rec.thumb + '" onerror="this.style.display=\'none\'">' : '';
         div.innerHTML =
-          thumbImg +
-          '<div class="body">' +
-            '<div class="pickrow">' +
-              '<input type="checkbox"' + (on ? ' checked' : '') + '>' +
-              '<span class="name">' + escapeHtml(rec.name) + '</span>' +
-            '</div>' +
-            '<div class="meta">' + rec.createdAt + ' · ' +
-              (rec.size / 1024 / 1024).toFixed(2) + ' MB' +
-              ' · ' + (rec.sent ? '✅ 已分享' : '⬜ 未分享') + '</div>' +
-          '</div>';
+          '<div class="pickrow">' +
+            '<input type="checkbox"' + (on ? ' checked' : '') + '>' +
+            '<span class="name">' + escapeHtml(rec.name) + '</span>' +
+          '</div>' +
+          '<div class="meta">' + rec.createdAt + ' · ' +
+            (rec.size / 1024 / 1024).toFixed(2) + ' MB' +
+            ' · ' + (rec.sent ? '✅ 已分享' : '⬜ 未分享') + '</div>';
         div.onclick = () => {
           selPdfs.has(rec.id) ? selPdfs.delete(rec.id) : selPdfs.add(rec.id);
           renderLibrary();
@@ -1067,16 +803,12 @@
         div.dataset.id = rec.id;
         const brokenBadge = rec.broken
           ? '<span style="color:#dc2626"> ⚠️ 含坏图</span>' : '';
-        const thumbImg = rec.thumb ? '<img class="thumb" src="' + rec.thumb + '" onerror="this.style.display=\'none\'">' : '';
         div.innerHTML =
-          thumbImg +
-          '<div class="body">' +
-            '<div class="pickrow">' +
-              '<input type="checkbox"' + (on ? ' checked' : '') + '>' +
-              '<span class="name">📄 ' + escapeHtml(rec.name) + brokenBadge + '</span>' +
-            '</div>' +
-            '<div class="meta">' + rec.createdAt + ' · ' + fmtSize(rec.size) + '</div>' +
-          '</div>';
+          '<div class="pickrow">' +
+            '<input type="checkbox"' + (on ? ' checked' : '') + '>' +
+            '<span class="name">📄 ' + escapeHtml(rec.name) + brokenBadge + '</span>' +
+          '</div>' +
+          '<div class="meta">' + rec.createdAt + ' · ' + fmtSize(rec.size) + '</div>';
         div.onclick = () => {
           selFiles.has(rec.id) ? selFiles.delete(rec.id) : selFiles.add(rec.id);
           renderFiles();
@@ -1426,10 +1158,9 @@
         if (bookNames.length === 1 && chaps.every(c => typeof c === 'number' && c >= 0)) {
           name = safeName(bookNames[0]) + '_' + rangeLabel(chaps) + '话.pdf';
         }
-        const mergedThumb = (recs.find(r => r.thumb) || {}).thumb || null;
         await dbPut({
           id: 'p-' + Date.now(), name, size: blob.size,
-          createdAt: new Date().toLocaleString('zh-CN'), sent: false, blob, thumb: mergedThumb
+          createdAt: new Date().toLocaleString('zh-CN'), sent: false, blob
         });
         renderLibrary();
         const dirNote = outlineOk ? '，含书签目录'
@@ -1667,25 +1398,23 @@
         const img = new Image();
         img.onload = ()=>{
           const w = img.naturalWidth || 800, h = img.naturalHeight || 1200;
-          let c = document.createElement('canvas');
+          const c = document.createElement('canvas');
           c.width = w; c.height = h;
           const ctx = c.getContext('2d');
           ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h);
           ctx.drawImage(img,0,0);
           URL.revokeObjectURL(url);
-          c = dbApply(c);                 // Kindle 漫画去糊（关闭时返回原图）
-          w = c.width; h = c.height;
           let variance = 999;
           try{
             const step = Math.max(1, Math.floor((w*h)/2000));
-            const data = c.getContext('2d').getImageData(0,0,w,h).data;
+            const data = ctx.getImageData(0,0,w,h).data;
             let sum=0, n=0;
             for(let i=0;i<data.length;i+=4*step){ sum+=(data[i]+data[i+1]+data[i+2])/3; n++; }
             const mean=sum/n; let s=0;
             for(let i=0;i<data.length;i+=4*step){ const v=(data[i]+data[i+1]+data[i+2])/3-mean; s+=v*v; }
             variance=Math.sqrt(s/n);
           }catch(_){}
-          resolve({ dataUrl:c.toDataURL('image/jpeg',0.92), w, h, variance, size: blob.size, canvas: c });
+          resolve({ dataUrl:c.toDataURL('image/jpeg',0.92), w, h, variance, size: blob.size });
         };
         img.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error('图片解码失败')); };
         img.src = url;
@@ -1830,11 +1559,10 @@
           if(!pages.length){ continue; }
           const blob = buildPdfBlob(pages);
           const name = makeFname(bookName, [ci]);
-          const thumb = pages[0] && pages[0].canvas ? dbMakeThumb(pages[0].canvas) : null;
           await dbPutFile({
             id: 'f-' + Date.now() + '-' + ci, name, size: blob.size,
             createdAt: new Date().toLocaleString('zh-CN'), blob, kind: 'legado',
-            bookName, chapter: ci, broken: chBroken, seq: ++fileSeq, order: fileSeq, thumb
+            bookName, chapter: ci, broken: chBroken, seq: ++fileSeq, order: fileSeq
           });
           okChapters++; builtCnt++;
           setLegadoProg(done/total, '已生成 '+builtCnt+'/'+idxs.length+' 话 PDF');
@@ -1894,8 +1622,7 @@
           const pages = IMAGES.filter(it=>it.ci===ci && it.data).map(it=>it.data);
           const chBroken = IMAGES.some(it=>it.ci===ci && it.broken);
           const blob = buildPdfBlob(pages);
-          const thumb = rec.thumb || (pages[0] && pages[0].canvas ? dbMakeThumb(pages[0].canvas) : null);
-          await dbPutFile({ ...rec, blob, size: blob.size, broken: chBroken, thumb });
+          await dbPutFile({ ...rec, blob, size: blob.size, broken: chBroken });
         }
         renderFiles();
         if(still){
@@ -1973,226 +1700,14 @@
     }
 
     // ================= 初始化 =================
-    // ================= 顶部标签页切换 =================
-    function initTabs() {
-      const mainBtn = document.getElementById('tabMainBtn');
-      const deblurBtn = document.getElementById('tabDeblurBtn');
-      const mainEl = document.getElementById('tabMain');
-      const deblurEl = document.getElementById('tabDeblur');
-      if (!mainBtn || !deblurBtn) return;
-      function switchTab(which) {
-        const toMain = which === 'main';
-        mainEl.style.display = toMain ? '' : 'none';
-        deblurEl.style.display = toMain ? 'none' : '';
-        mainBtn.classList.toggle('active', toMain);
-        deblurBtn.classList.toggle('active', !toMain);
-      }
-      mainBtn.addEventListener('click', () => switchTab('main'));
-      deblurBtn.addEventListener('click', () => switchTab('deblur'));
-      window.switchTab = switchTab;   // 供主页面去糊状态横幅跳转
-      switchTab('main'); // 默认显示「主页面」，点「去糊设置」才展示拉条等设置
-    }
-
-    // ================= Kindle 漫画去糊：设置卡逻辑 =================
-    const DB_PARAMS = {
-      width:      { min:300, max:2000, step:1,   def:1236, label:'目标宽度 (px)',
-        tip:'去糊后图的像素宽度。设为你的 Kindle 真实屏宽，可避免设备端二次放大发糊；选「保留原图尺寸」则不改大小。' },
-      contrast:   { min:-100, max:100,  step:1,   def:20,   label:'对比度',
-        tip:'增强明暗反差。调高让线条和小字更"立"、更清晰；电子墨水屏偏灰，建议 +20～40。负值会让画面发灰变糊。' },
-      gamma:      { min:0.5,  max:2,    step:0.05,def:1,    label:'伽马 (Gamma)',
-        tip:'控制中间调明暗。小于 1 提亮暗部、让暗处细节显现；大于 1 压暗。漫画夜场景可略低于 1。' },
-      sharpen:    { min:0,    max:200,  step:1,   def:100,  label:'锐化强度',
-        tip:'用非锐化掩蔽强化边缘，是去糊主力。调高小字和网点立刻变清晰；过高会出现白边/噪点，建议 80～150。' },
-      grayscale:  { min:0,    max:100,  step:1,   def:0,    label:'黑白度 (灰度混合)',
-        tip:'把彩色往灰度拉的程度。越高越接近墨水屏的单色观感，黑白漫画可拉高；彩色漫画一般保持 0。' },
-      brightness: { min:-100, max:100,  step:1,   def:0,    label:'亮度',
-        tip:'整体提亮或压暗。原图偏暗时略微调正；过亮会冲掉细节、过暗丢失暗部。一般保持 0，配合伽马微调。' },
-    };
-    const DB_STORE = 'kccDefaults';
-    function initDeblur() {
-      const paramsBox = document.getElementById('kParams');
-      if (!paramsBox) return;
-      const controls = {};
-      const deviceSel = document.getElementById('dbDevice');
-      const enableChk = document.getElementById('dbEnable');
-      const body = document.getElementById('kBody');
-      const statusEl = document.getElementById('dbStatus');
-      const statusMsg = m => { if (statusEl) statusEl.textContent = m; };
-      let srcImg = null, previewTimer = null;
-      function schedulePreview() { clearTimeout(previewTimer); previewTimer = setTimeout(renderPreview, 120); }
-
-      function setParam(key, val) {
-        const c = controls[key]; if (!c) return;
-        val = dbClamp(parseFloat(val), DB_PARAMS[key].min, DB_PARAMS[key].max);
-        c.num.value = (DB_PARAMS[key].step < 1) ? val.toFixed(2) : val;
-        c.rng.value = val;
-        c.vtag.textContent = (DB_PARAMS[key].step < 1) ? val.toFixed(2) : val;
-      }
-      function getVal(key) { const c = controls[key]; return c ? parseFloat(c.num.value) : DB_PARAMS[key].def; }
-
-      for (const [key, p] of Object.entries(DB_PARAMS)) {
-        const row = document.createElement('div');
-        row.className = 'krow';
-        row.innerHTML =
-          '<div class="klabel"><span>' + p.label + '</span><b id="dbv_' + key + '"></b></div>' +
-          '<div class="ktip">' + p.tip + '</div>' +
-          '<div class="kprow">' +
-            '<input type="number" class="knum" id="dbNum_' + key + '" min="' + p.min + '" max="' + p.max + '" step="' + p.step + '">' +
-            '<input type="range" id="dbRng_' + key + '" min="' + p.min + '" max="' + p.max + '" step="' + p.step + '">' +
-          '</div>';
-        paramsBox.appendChild(row);
-        const num = row.querySelector('#dbNum_' + key);
-        const rng = row.querySelector('#dbRng_' + key);
-        const vtag = row.querySelector('#dbv_' + key);
-        controls[key] = { num, rng, vtag };
-        const setVal = (val) => {
-          val = dbClamp(parseFloat(val), p.min, p.max);
-          if (isNaN(val)) val = p.def;
-          num.value = (p.step < 1) ? val.toFixed(2) : val;
-          rng.value = val;
-          vtag.textContent = (p.step < 1) ? val.toFixed(2) : val;
-          if (key === 'width') syncDeviceOnManualWidth(val);
-          schedulePreview();
-        };
-        num.addEventListener('input', () => setVal(num.value));
-        rng.addEventListener('input', () => setVal(rng.value));
-        setVal(p.def);
-      }
-
-      function syncDeviceOnManualWidth(val) {
-        const w = parseInt(deviceSel.value, 10);
-        if (w > 0 && val !== w) deviceSel.value = '0';
-      }
-      function applyDevice() {
-        const v = deviceSel.value;
-        if (v === '-1') { controls.width.num.disabled = true; controls.width.rng.disabled = true; return; }
-        controls.width.num.disabled = false; controls.width.rng.disabled = false;
-        const w = parseInt(v, 10);
-        if (w > 0) setParam('width', w);
-      }
-      deviceSel.addEventListener('change', () => { applyDevice(); schedulePreview(); updateDbBanner(); });
-
-      function refreshEnabled() {
-        const on = enableChk.checked;
-        body.classList.toggle('disabled', !on);
-        body.querySelectorAll('input,select').forEach(el => { if (el !== enableChk) el.disabled = !on; });
-        updateDbBanner();   // 同步主页面顶部状态横幅
-      }
-      enableChk.addEventListener('change', refreshEnabled);
-      refreshEnabled();
-
-      // 预览（上传一张图，左右对比原图 / 去糊后）
-      const prevOrig = document.getElementById('dbPrevOrig');
-      const prevProc = document.getElementById('dbPrevProc');
-      const imgInput = document.getElementById('dbImgInput');
-      function drawPrev(cv, srcCanvas) {
-        const maxW = cv.clientWidth || 220;
-        const scale = Math.min(1, maxW / srcCanvas.width);
-        cv.width = Math.round(srcCanvas.width * scale);
-        cv.height = Math.round(srcCanvas.height * scale);
-        const g = cv.getContext('2d');
-        g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
-        g.drawImage(srcCanvas, 0, 0, cv.width, cv.height);
-      }
-      function renderPreview() {
-        if (!srcImg) return;
-        const p = dbGetParams() || { width: 0, upscale: true };
-        const origC = (p.width > 0) ? dbResizeToWidth(srcImg, p.width, p.upscale) : srcImg;
-        const procC = dbApply(srcImg);
-        drawPrev(prevOrig, origC);
-        drawPrev(prevProc, procC);
-      }
-      imgInput.addEventListener('change', e => {
-        const f = e.target.files[0]; if (!f) return;
-        const url = URL.createObjectURL(f);
-        const im = new Image();
-        im.onload = () => { srcImg = im; renderPreview(); URL.revokeObjectURL(url); };
-        im.onerror = () => { URL.revokeObjectURL(url); };
-        im.src = url; e.target.value = '';
-      });
-
-      // 保存 / 恢复默认
-      function collectPreset() {
-        const params = {}; for (const k in controls) params[k] = getVal(k);
-        return { params, device: deviceSel.value,
-          upscale: document.getElementById('dbUpscale').checked,
-          dither: document.getElementById('dbDither').checked,
-          purebw: document.getElementById('dbPurebw').checked };
-      }
-      function applyPreset(d) {
-        if (!d || !d.params) return;
-        for (const k in d.params) if (controls[k]) setParam(k, d.params[k]);
-        deviceSel.value = d.device || '1236'; applyDevice();
-        document.getElementById('dbUpscale').checked = !!d.upscale;
-        document.getElementById('dbDither').checked = !!d.dither;
-        document.getElementById('dbPurebw').checked = !!d.purebw;
-        schedulePreview();
-      }
-      document.getElementById('dbSave').addEventListener('click', () => {
-        try { localStorage.setItem(DB_STORE, JSON.stringify(collectPreset())); statusMsg('已保存当前参数与设备为默认，下次打开自动生效'); }
-        catch (e) { statusMsg('⚠️ 保存失败（浏览器可能禁用了本地存储）'); }
-      });
-      document.getElementById('dbReset').addEventListener('click', () => {
-        for (const k in DB_PARAMS) setParam(k, DB_PARAMS[k].def);
-        deviceSel.value = '1236'; applyDevice();
-        document.getElementById('dbUpscale').checked = true;
-        document.getElementById('dbDither').checked = true;
-        document.getElementById('dbPurebw').checked = false;
-        schedulePreview(); statusMsg('已恢复默认参数');
-      });
-      // 「抽取文件图片」：从上传过的文件里取一张图填入预览，不用重新选文件
-      // 把 blob 解码成 canvas 供预览（bitmap 用完立即 close，避免常驻解码内存）
-      const canvasFromBitmap = async (blob) => {
-        const bmp = await createImageBitmap(blob);
-        const c = document.createElement('canvas');
-        c.width = bmp.width; c.height = bmp.height;
-        c.getContext('2d').drawImage(bmp, 0, 0);
-        if (bmp.close) bmp.close();
-        return c;
-      };
-      document.getElementById('dbPickFromLib').addEventListener('click', async () => {
-        // 1) 文件库（Legado）记录里的原始图片 blob
-        if (db) {
-          try {
-            const recs = await dbAllFiles();
-            const rec = (recs || []).find(r => r.blob);
-            if (rec) {
-              srcImg = await canvasFromBitmap(rec.blob); renderPreview();
-              statusMsg('已从文件库抽取：' + (rec.name || '图片') + '（原图，去糊前）');
-              return;
-            }
-          } catch (e) { /* 落入下一步 */ }
-          // 2) PDF 库的代表缩略图（去糊后）
-          try {
-            const recs = await dbAll();
-            const rec = (recs || []).find(r => r.thumb);
-            if (rec) {
-              const im = new Image();
-              im.onload = () => { srcImg = im; renderPreview(); };
-              im.src = rec.thumb;
-              statusMsg('已从 PDF 库抽取代表图（去糊后缩略图）：' + (rec.name || ''));
-              return;
-            }
-          } catch (e) { /* ignore */ }
-        }
-        statusMsg('⚠️ 没找到可抽取的图片：请先上传 ZIP / 图片，或用 Legado 读取文件');
-      });
-      try { const s = localStorage.getItem(DB_STORE); if (s) applyPreset(JSON.parse(s)); } catch (e) {}
-      updateDbBanner();   // 初始化主页面顶部状态横幅
-    }
-
     (async () => {
-      // 先画页面：标签页与去糊设置面板不依赖任何库 / 存储，必须最先初始化，
-      // 这样无论后续脚本加载或 IndexedDB 是否可用，页面与标签页都能正常显示、切换。
-      initTabs();
-      initDeblur();
       await ensureLibs();
       checkLibs();   // 仅检查首页必需库，缺则提示；pdf-lib 留到合并时检查
       try { localStorage.removeItem('zip2pdf.kindleEmail'); } catch (e) {}
-      bindBulk();
-      bindLegado();
       try {
         db = await openDB();
+        bindBulk();
+        bindLegado();
         renderUploads();
         renderFiles();
         renderLibrary();
