@@ -359,13 +359,6 @@
         <label class="kswitch"><input type="checkbox" id="dbEnable" checked><span class="track"></span><span class="txt">启用去糊</span></label>
       </div>
 
-      <div class="ksec">
-        <div class="row" style="margin-bottom:8px">
-          <input type="number" id="dbThreads" value="4" min="1" max="16" style="flex:0 0 72px;width:72px;text-align:center;border:1px solid #d1d5db;border-radius:8px;padding:8px 6px;font-family:inherit;font-size:13px">
-          <span style="font-size:12px;color:#9ca3af;flex:1;line-height:1.5">并行线程数（去糊加速）：高→多页同时去糊更快、充分利用多核；低→更省内存、单线程更稳。建议 2~4。</span>
-        </div>
-      </div>
-
       <div class="ksec" id="kBody">
         <label style="display:block;margin-bottom:6px">目标硬件（决定重采样宽度）</label>
         <select id="dbDevice" class="sel-select" style="margin-bottom:10px">
@@ -634,10 +627,16 @@
       return out;
     }
 
-    // 增强核心（纯数据版，不依赖 canvas）：亮度 → 灰度混合 → 对比度 → 伽马 → 锐化 → 抖动/黑白
-    // 单遍化：全程只在传入的一份 Uint8ClampedArray 上顺序处理、原地修改。
-    // 与 dbEnhance 共享同一份算法；此版可被 Web Worker 调用（无 DOM 依赖）。
-    function dbEnhanceCore(d, W, H, p) {
+    // 增强：亮度 → 灰度混合 → 对比度 → 伽马 → 锐化 → 抖动/黑白
+    // 单遍化：全程只在内存中的一份 ImageData 上顺序处理，最后一次性 putImageData。
+    // （旧实现每步各做一次 get/putImageData，全图内存往返 4 次；在 legado 并发
+    //  取图时是卡顿主因之一。行为等价：Uint8ClampedArray 赋值自带 clamp+round。）
+    function dbEnhance(canvas, p) {
+      const W = canvas.width, H = canvas.height;
+      if (!W || !H) return canvas;
+      const g = canvas.getContext('2d');
+      const img = g.getImageData(0, 0, W, H);
+      const d = img.data;
       const b = (p.brightness || 0) / 100 * 255;
       const c = (p.contrast || 0) / 100;
       const cf = (259 * (c * 255 + 255)) / (255 * (259 - c * 255));
@@ -683,96 +682,7 @@
           if (y + 1 < H) { if (x - 1 >= 0) d[i + 4 * W - 4] += err * 3 / 16; d[i + 4 * W] += err * 5 / 16; if (x + 1 < W) d[i + 4 * W + 4] += err * 1 / 16; }
         }
       }
-      return d;
-    }
-
-    // 增强（canvas 版）：取 ImageData → 核心 → 写回，供预览等同步路径复用
-    function dbEnhance(canvas, p) {
-      const W = canvas.width, H = canvas.height;
-      if (!W || !H) return canvas;
-      const g = canvas.getContext('2d');
-      const img = g.getImageData(0, 0, W, H);
-      dbEnhanceCore(img.data, W, H, p);
       g.putImageData(img, 0, 0);   // 唯一一次写回
-      return canvas;
-    }
-
-    // ================= 去糊并行（Web Worker 池，dbThreads 控制并发） =================
-    // 内联 Worker 源码：注入 dbClamp / dbBoxBlurGray / dbEnhanceCore 三份「与主线程同源」的纯函数。
-    // localhost 下 Blob Worker 可用（本应用的 sw.js 即证明运行在 localhost/https）；
-    // 若创建失败则整池 fallback 到主线程同步，功能不退化。
-    const DB_WORKER_SRC = dbClamp.toString() + '\n' + dbBoxBlurGray.toString() + '\n' + dbEnhanceCore.toString() + `
-    self.onmessage = function(e){
-      const m = e.data;
-      try {
-        dbEnhanceCore(m.data, m.width, m.height, m.p);
-        self.postMessage({ id: m.id, data: m.data }, [m.data.buffer]);
-      } catch (err) { self.postMessage({ id: m.id, err: String(err) }); }
-    };`;
-
-    let _dbPool = null;
-    function dbEnhancePool() {
-      if (_dbPool) return _dbPool;
-      const pool = { workers: [], queue: [], fallback: false, seq: 0 };
-      try {
-        const url = URL.createObjectURL(new Blob([DB_WORKER_SRC], { type: 'application/javascript' }));
-        for (let i = 0; i < 16; i++) {
-          const w = new Worker(url);
-          w._busy = false; w._job = null;
-          w.onmessage = (ev) => {
-            const { id, data, err } = ev.data; const j = w._job;
-            w._busy = false; w._job = null;
-            if (err) j.rej(new Error(err)); else j.res(data);
-            dbPump(pool);
-          };
-          w.onerror = (ev) => {
-            const j = w._job; w._busy = false; w._job = null;
-            if (j) j.rej(new Error(ev.message || 'worker error'));
-            dbPump(pool);
-          };
-          pool.workers.push(w);
-        }
-      } catch (e) { pool.fallback = true; }
-      _dbPool = pool;
-      return pool;
-    }
-    function dbPump(pool) {
-      if (pool.fallback) {   // 主线程兜底：同步处理队列（行为与旧版一致）
-        while (pool.queue.length) {
-          const t = pool.queue.shift();
-          try { dbEnhanceCore(t.req.data, t.req.width, t.req.height, t.req.p); t.res(t.req.data); }
-          catch (e) { t.rej(e); }
-        }
-        return;
-      }
-      const n = dbGetThreads();
-      for (let k = 0; k < pool.workers.length; k++) {
-        const w = pool.workers[k];
-        if (k >= n) break;                 // 仅启用前 n 个 worker（并发数 = 并行线程数设置）
-        if (w._busy || !pool.queue.length) continue;
-        const t = pool.queue.shift();
-        w._busy = true; w._job = t;
-        try { w.postMessage(t.req, [t.req.data.buffer]); }   // Transferable 零拷贝
-        catch (e2) { w.postMessage(t.req); }                // 旧环境不支持 transfer 时退回拷贝
-      }
-    }
-    // 异步增强：把一页的像素交给 worker 池（或 fallback 主线程），返回处理后的 Uint8ClampedArray
-    function dbEnhanceAsync(data, W, H, p) {
-      const pool = dbEnhancePool();
-      return new Promise((res, rej) => {
-        pool.queue.push({ req: { id: pool.seq++, width: W, height: H, data, p }, res, rej });
-        dbPump(pool);
-      });
-    }
-    // 异步版 dbApply：主线程完成 resize/prepare，增强并行交给 worker 池；与 dbApply 行为等价
-    async function dbApplyAsync(canvas, p) {
-      if (!canvas) return canvas;
-      if (!p) return canvas;
-      if (p.width > 0) canvas = dbResizeToWidth(canvas, p.width, p.upscale);
-      const g = canvas.getContext('2d');
-      const img = g.getImageData(0, 0, canvas.width, canvas.height);
-      const out = await dbEnhanceAsync(img.data, canvas.width, canvas.height, p);
-      g.putImageData(new ImageData(out, canvas.width, canvas.height), 0, 0);
       return canvas;
     }
 
@@ -1612,8 +1522,7 @@
       c.width = bmp.width; c.height = bmp.height;
       c.getContext('2d').drawImage(bmp, 0, 0);
       if (bmp.close) bmp.close();
-      const p = dbGetParams();
-      const work = await dbApplyAsync(c, p);   // 走 worker 池并行增强（无 worker 时回退主线程同步）
+      const work = dbApply(c);   // dbApply 内部读开关：关闭时原样返回
       return { canvas: work, dataUrl: work.toDataURL('image/jpeg', 0.92) };
     }
 
@@ -1705,22 +1614,15 @@
       const src = await PDFLib.PDFDocument.load(bytes);
       const out = await PDFLib.PDFDocument.create();
       const srcPages = src.getPages();
-      const N = dbGetThreads();   // 并发数 = 并行线程数设置
-      // 并发处理：每页 prepare(主线程解码/resize)→enhance(worker 并行)→收尾(主线程)，结果按序落库
-      const results = await mapLimit(srcPages, N, async (page) => {
-        const jpeg = await extractJpegFromPage(src, page);
-        if (!jpeg) return { proc: null };
-        const proc = await jpegToDeblurred(jpeg);
-        return { proc };
-      });
       let firstProc = null;
       for (let pi = 0; pi < srcPages.length; pi++) {
-        const r = results[pi];
-        if (r.proc) {
-          const page = out.addPage([r.proc.canvas.width, r.proc.canvas.height]);
-          const img = await out.embedJpg(r.proc.dataUrl);
-          page.drawImage(img, { x: 0, y: 0, width: r.proc.canvas.width, height: r.proc.canvas.height });
-          if (!firstProc) firstProc = r.proc.canvas;
+        const jpeg = await extractJpegFromPage(src, srcPages[pi]);
+        if (jpeg) {
+          const proc = await jpegToDeblurred(jpeg);
+          const page = out.addPage([proc.canvas.width, proc.canvas.height]);
+          const img = await out.embedJpg(proc.dataUrl);
+          page.drawImage(img, { x: 0, y: 0, width: proc.canvas.width, height: proc.canvas.height });
+          if (!firstProc) firstProc = proc.canvas;
         } else {
           const cp = await out.copyPages(src, [pi]);
           cp.forEach(p => out.addPage(p));
@@ -1744,6 +1646,7 @@
       const thumb = firstProc ? dbMakeThumb(firstProc) : rec.thumb;
       await dbPut({ ...rec, blob, size: blob.size, thumb, deblurred: true });
     }
+
 
     // ================= PDF 书签 / 大纲（/Outlines）=================
     // Kindle、KOReader 及多数阅读器侧边的「目录」读的是 PDF 内部的 /Outlines 树，
@@ -1825,10 +1728,10 @@
         return na;
       }
 
-      // 递归统计 firstRef 起的条目总数（含所有层级）
-      function countItems(fRef) {
+      // 递归统计 firstRef 起的条目总数（含所有层级）；shared seen 防止循环引用无限递归
+      function countItems(fRef, seen) {
+        seen = seen || new Set();
         let total = 0;
-        const seen = new Set();
         let cur = fRef;
         while (cur && !seen.has(refKey(cur))) {
           seen.add(refKey(cur));
@@ -1836,7 +1739,7 @@
           total += 1;
           if (it) {
             const ch = it.get(P.PDFName.of('First'));
-            if (ch) total += countItems(ch);
+            if (ch) total += countItems(ch, seen);
             cur = it.get(P.PDFName.of('Next'));
           } else cur = null;
         }
@@ -1844,9 +1747,12 @@
       }
 
       // 递归构建一条目及其子条目；parentRef 为其父（根或另一条目）在目标文档的 ref
-      function buildItem(srcItemRef, parentRef) {
+      function buildItem(srcItemRef, parentRef, seen) {
         const it = srcDoc.context.lookup(srcItemRef);
         if (!it) return null;
+        seen = seen || new Set();
+        if (seen.has(refKey(srcItemRef))) return null;   // 防止源大纲循环引用导致无限递归
+        seen.add(refKey(srcItemRef));
         const dict = ctx.obj({});
         const title = it.get(P.PDFName.of('Title'));
         if (title) dict.set(P.PDFName.of('Title'), title);
@@ -1872,7 +1778,7 @@
           let cur = childFirst;
           while (cur && !seen.has(refKey(cur))) {
             seen.add(refKey(cur));
-            const built = buildItem(cur, null);
+            const built = buildItem(cur, null, seen);
             if (built) childRefs.push(built);
             const ci = srcDoc.context.lookup(cur);
             cur = ci ? ci.get(P.PDFName.of('Next')) : null;
@@ -1883,7 +1789,7 @@
           childRefs.forEach(cr => ctx.lookup(cr).set(P.PDFName.of('Parent'), ref));
           dict.set(P.PDFName.of('First'), childRefs[0]);
           dict.set(P.PDFName.of('Last'), childRefs[childRefs.length - 1]);
-          dict.set(P.PDFName.of('Count'), P.PDFNumber.of(countItems(childFirst)));
+          dict.set(P.PDFName.of('Count'), P.PDFNumber.of(countItems(childFirst, seen)));
           for (let i = 0; i < childRefs.length; i++) {
             const cd = ctx.lookup(childRefs[i]);
             if (i > 0) cd.set(P.PDFName.of('Prev'), childRefs[i - 1]);
@@ -1910,7 +1816,7 @@
       // 目标根
       const dstRoot = ctx.obj({ Type: P.PDFName.of('Outlines') });
       const dstRootRef = ctx.register(dstRoot);
-      topRefs.forEach(tr => ctx.lookup(tr).set(P.PDFName.of('Parent'), dstRootRef));
+      topRefs.forEach(tr => { const lo = ctx.lookup(tr); if (lo) lo.set(P.PDFName.of('Parent'), dstRootRef); });
       dstRoot.set(P.PDFName.of('First'), topRefs[0]);
       dstRoot.set(P.PDFName.of('Last'), topRefs[topRefs.length - 1]);
       dstRoot.set(P.PDFName.of('Count'), P.PDFNumber.of(countItems(srcFirst)));
@@ -2542,16 +2448,10 @@
       }
       deviceSel.addEventListener('change', () => { applyDevice(); schedulePreview(); updateDbLibBar(); });
 
-      function dbGetThreads() {
-        const e = document.getElementById('dbThreads');
-        const v = e ? parseInt(e.value, 10) : 4;
-        return dbClamp((v && v >= 1) ? v : 4, 1, 16);
-      }
       function refreshEnabled() {
         const on = enableChk.checked;
         body.classList.toggle('disabled', !on);
         body.querySelectorAll('input,select').forEach(el => { if (el !== enableChk) el.disabled = !on; });
-        const t = document.getElementById('dbThreads'); if (t) t.disabled = !on;   // 并行线程数在开关模块下，单独禁用
         statusMsg('');   // 清除「去糊未启用」等过期提示
         updateDbLibBar();   // 同步 PDF 库去糊控制行
       }
@@ -2602,7 +2502,6 @@
           upscale: document.getElementById('dbUpscale').checked,
           dither: document.getElementById('dbDither').checked,
           purebw: document.getElementById('dbPurebw').checked,
-          threads: dbGetThreads(),
           enabled: enableChk.checked };
       }
       function applyPreset(d) {
@@ -2612,7 +2511,6 @@
         document.getElementById('dbUpscale').checked = !!d.upscale;
         document.getElementById('dbDither').checked = !!d.dither;
         document.getElementById('dbPurebw').checked = !!d.purebw;
-        const tEl = document.getElementById('dbThreads'); if (tEl) tEl.value = (d.threads != null ? d.threads : 4);
         if (enableChk) enableChk.checked = (d.enabled !== false);   // 主开关：默认开启
         refreshEnabled();   // 同步面板禁用态
         schedulePreview();
@@ -2623,7 +2521,6 @@
         document.getElementById('dbUpscale').checked = true;
         document.getElementById('dbDither').checked = false;   // 抖动计算量大，默认关
         document.getElementById('dbPurebw').checked = false;
-        const tEl = document.getElementById('dbThreads'); if (tEl) tEl.value = 4;
         if (enableChk) enableChk.checked = true;
         refreshEnabled();
         schedulePreview();
