@@ -345,14 +345,16 @@
       </div>
 
       <div class="ksec">
-        <label>预览（在 PDF 库单选一个文件即自动抽取其图片；也可点下方按钮手动选图，均不影响实际转换）</label>
+        <label>预览</label>
         <input type="file" id="dbImgInput" accept="image/*">
-        <div style="margin:8px 0">
-          <button class="btn small gray" id="dbPick" style="width:100%" onclick="document.getElementById('dbImgInput').click()">测试</button>
+        <div style="display:flex;gap:8px;margin:8px 0">
+          <button class="btn small gray" id="dbPick" style="flex:1" onclick="document.getElementById('dbImgInput').click()">测试</button>
+          <input type="number" id="dbPageInput" min="1" step="1" placeholder="共0页" title="输入选中 PDF 的页码，查看该页预览"
+            style="flex:0 0 96px;text-align:center;border:1px solid #d1d5db;border-radius:8px;padding:8px 6px;font-family:inherit;font-size:13px">
         </div>
         <div class="kprev">
-          <div class="pcell"><canvas id="dbPrevOrig"></canvas><div class="ptitle">原图</div></div>
-          <div class="pcell"><canvas id="dbPrevProc"></canvas><div class="ptitle">去糊后（实时）</div></div>
+          <div class="pcell"><canvas id="dbPrevOrig" title="点击放大查看"></canvas><div class="ptitle">原图</div></div>
+          <div class="pcell"><canvas id="dbPrevProc" title="点击放大查看"></canvas><div class="ptitle">去糊后（实时）</div></div>
         </div>
       </div>
 
@@ -2242,9 +2244,12 @@
       }
       imgInput.addEventListener('change', e => {
         const f = e.target.files[0]; if (!f) return;
+        // 手动选图：脱离 PDF 翻页上下文（视作 1 页）
+        dbCurPdfDoc = null; dbCurPageCount = 1; dbCurRecName = f.name || '手动选图';
+        updateDbPageInput(1);
         const url = URL.createObjectURL(f);
         const im = new Image();
-        im.onload = () => { srcImg = im; renderPreview(); URL.revokeObjectURL(url); };
+        im.onload = () => { srcImg = im; renderPreview(); URL.revokeObjectURL(url); statusMsg('已加载本地图片（原图）'); };
         im.onerror = () => { URL.revokeObjectURL(url); };
         im.src = url; e.target.value = '';
       });
@@ -2278,27 +2283,70 @@
         document.getElementById('dbPurebw').checked = false;
         schedulePreview(); statusMsg('已恢复默认参数');
       });
-      // 供 PDF 库单选时抽取该文件的图片到预览（ZIP / 图片 / Legado 来源统一走此路线）
-      // blob 为 PDF 文件：提取第一张内嵌 JPEG → 解码成 canvas → 填入左右对比预览
+      // 供 PDF 库单选时读取该文件并抽图到预览（ZIP / 图片 / Legado 来源统一走此路线）。
+      // 保留 pdf-lib 文档引用，配合页码输入框可翻页预览任意页。
+      let dbCurPdfDoc = null, dbCurPageCount = 0, dbCurRecName = '';
+      function updateDbPageInput(pi) {
+        const inp = document.getElementById('dbPageInput');
+        if (!inp) return;
+        inp.placeholder = '共' + dbCurPageCount + '页';
+        inp.value = pi;
+        inp.disabled = dbCurPageCount <= 0;
+      }
+      // 显示当前 PDF 的第 pi 页（1 基）
+      async function dbShowPdfPage(pi) {
+        const pdfDoc = dbCurPdfDoc;
+        if (!pdfDoc) return;
+        const page = pdfDoc.getPage(pi - 1);
+        if (!page) { statusMsg('⚠️ 没有第 ' + pi + ' 页'); return; }
+        statusMsg('正在读取第 ' + pi + ' / ' + dbCurPageCount + ' 页…');
+        const jpeg = await extractJpegFromPage(pdfDoc, page);
+        if (!jpeg) { statusMsg('⚠️ 没能提取第 ' + pi + ' 页的图片（非标准内嵌页）'); return; }
+        const bmp = await createImageBitmap(jpeg);
+        const c = document.createElement('canvas');
+        c.width = bmp.width; c.height = bmp.height;
+        c.getContext('2d').drawImage(bmp, 0, 0);
+        if (bmp.close) bmp.close();
+        srcImg = c; renderPreview();
+        statusMsg('已读取「' + dbCurRecName + '」第 ' + pi + ' / ' + dbCurPageCount + ' 页（原图）');
+      }
       window.dbSetPreviewFromPdf = async (rec) => {
         try {
-          if (typeof PDFLib === 'undefined') { statusMsg('⚠️ pdf-lib 未加载，无法抽取 PDF 内图片'); return; }
-          statusMsg('正在抽取「' + (rec.name || '') + '」的图片…');
+          if (typeof PDFLib === 'undefined') { statusMsg('⚠️ pdf-lib 未加载，无法读取 PDF'); return; }
+          statusMsg('正在读取「' + (rec.name || '') + '」…');
           const bytes = await rec.blob.arrayBuffer();
           const pdfDoc = await PDFLib.PDFDocument.load(bytes);
-          const page = pdfDoc.getPage(0);
-          if (!page) { statusMsg('⚠️ 该 PDF 没有页面'); return; }
-          const jpeg = await extractJpegFromPage(pdfDoc, page);
-          if (!jpeg) { statusMsg('⚠️ 没能从该 PDF 提取到图片（可能是目录页或非标准内嵌）'); return; }
-          const bmp = await createImageBitmap(jpeg);
-          const c = document.createElement('canvas');
-          c.width = bmp.width; c.height = bmp.height;
-          c.getContext('2d').drawImage(bmp, 0, 0);
-          if (bmp.close) bmp.close();
-          srcImg = c; renderPreview();
-          statusMsg('已抽取「' + (rec.name || '') + '」的图片（第 1 页，原图）');
-        } catch (e) { statusMsg('⚠️ 抽取失败：' + e.message); }
+          dbCurPdfDoc = pdfDoc;
+          dbCurPageCount = pdfDoc.getPageCount();
+          dbCurRecName = rec.name || '';
+          updateDbPageInput(1);
+          if (!dbCurPageCount) { statusMsg('⚠️ 该 PDF 没有页面'); return; }
+          await dbShowPdfPage(1);
+        } catch (e) { statusMsg('⚠️ 读取失败：' + e.message); }
       };
+      // 页码输入框：跳页预览
+      const dbPageInput = document.getElementById('dbPageInput');
+      if (dbPageInput) dbPageInput.addEventListener('change', async () => {
+        if (!dbCurPdfDoc) return;
+        let pi = parseInt(dbPageInput.value, 10);
+        if (isNaN(pi)) pi = 1;
+        pi = Math.max(1, Math.min(dbCurPageCount, pi));
+        updateDbPageInput(pi);
+        await dbShowPdfPage(pi);
+      });
+      // 预览图点击放大（左右任一图均可）
+      const dbLightbox = document.getElementById('dbLightbox');
+      const dbLightboxImg = document.getElementById('dbLightboxImg');
+      [document.getElementById('dbPrevOrig'), document.getElementById('dbPrevProc')].forEach(cv => {
+        if (!cv) return;
+        cv.style.cursor = 'zoom-in';
+        cv.addEventListener('click', () => {
+          if (!cv.width || !cv.height || !dbLightbox) return;
+          dbLightboxImg.src = cv.toDataURL('image/png');
+          dbLightbox.style.display = 'flex';
+        });
+      });
+      if (dbLightbox) dbLightbox.addEventListener('click', () => { dbLightbox.style.display = 'none'; });
       try { const s = localStorage.getItem(DB_STORE); if (s) applyPreset(JSON.parse(s)); } catch (e) {}
 
       // PDF 库「去糊 / 去启用」按钮：未启用 → 跳去糊设置；启用 → 对勾选的文件依次去糊
@@ -2365,5 +2413,10 @@
       }
     })();
   </script>
+
+  <!-- 去糊预览大图查看（点预览图放大） -->
+  <div id="dbLightbox" class="mask" style="display:none" title="点击任意处关闭">
+    <img id="dbLightboxImg" alt="预览大图" style="max-width:92vw;max-height:92vh;border-radius:8px;background:#fff;cursor:zoom-out;box-shadow:0 8px 40px rgba(0,0,0,.35)">
+  </div>
 </body>
 </html>
