@@ -375,8 +375,6 @@
   <script src="vendor/pdf-lib.min.js"></script>
   <script>
     let db = null;
-    // 最近一次上传任务的首张原图 canvas（去糊前），供去糊设置「抽取文件图片」预览
-    let dbLastSrcCanvas = null;
 
     // ============ 依赖库兜底加载 ============
     const LIBS = [
@@ -533,13 +531,6 @@
             g.fillStyle = '#ffffff';
             g.fillRect(0, 0, w, h);
             g.drawImage(img, 0, 0, w, h);
-            // 暂存本次上传任务的首张原图（去糊前），供去糊设置「抽取文件图片」预览
-            if (!dbLastSrcCanvas) {
-              const sc = document.createElement('canvas');
-              sc.width = w; sc.height = h;
-              sc.getContext('2d').drawImage(img, 0, 0, w, h);
-              dbLastSrcCanvas = sc;
-            }
             let work = dbApply(c);   // Kindle 漫画去糊（关闭时返回原图）
             const dataUrl = work.toDataURL('image/jpeg', JPEG_QUALITY);
             if (!dataUrl || dataUrl.length < 200) {
@@ -792,7 +783,6 @@
 
     // ================= 转换主流程（ZIP）=================
     document.getElementById('fileInput').addEventListener('change', async (e) => {
-      dbLastSrcCanvas = null;   // 新上传任务开始：清掉上一轮暂存的原图
       const file = e.target.files[0];
       e.target.value = '';
       if (!file) return;
@@ -869,7 +859,6 @@
 
     // ================= 直接选图片 =================
     document.getElementById('imgInput').addEventListener('change', async (e) => {
-      dbLastSrcCanvas = null;   // 新上传任务开始：清掉上一轮暂存的原图
       const files = Array.from(e.target.files || []);
       e.target.value = '';
       if (!files.length) return;
@@ -1684,13 +1673,6 @@
           ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h);
           ctx.drawImage(img,0,0);
           URL.revokeObjectURL(url);
-          // 暂存本次 Legado 任务的首张原图（去糊前），供「抽取文件图片」预览
-          if (!dbLastSrcCanvas) {
-            const sc = document.createElement('canvas');
-            sc.width = w; sc.height = h;
-            sc.getContext('2d').drawImage(img, 0, 0, w, h);
-            dbLastSrcCanvas = sc;
-          }
           c = dbApply(c);                 // Kindle 漫画去糊（关闭时返回原图）
           w = c.width; h = c.height;
           let variance = 999;
@@ -1791,7 +1773,6 @@
 
     // 生成：每选中的话 → 一个 PDF，存入文件库（不进 我的PDF库）
     async function legadoBuild(){
-      dbLastSrcCanvas = null;   // 新任务开始：清掉上一轮暂存的原图
       const b = BOOKS[+$('#legadoBookSel').value];
       if(!b){ setLegadoStatus('请先选择书籍。'); return; }
       const bookUrl = b.bookUrl || b.url;
@@ -1891,7 +1872,6 @@
 
     // 只重下坏图：再请求一次（legado 有缓存，常在第二次成功），重建受影响的话并覆盖文件库记录
     async function legadoReDownload(){
-      dbLastSrcCanvas = null;   // 新任务开始：清掉上一轮暂存的原图
       const bad = IMAGES.filter(it=>it.broken);
       if(!bad.length){ setLegadoStatus('当前没有坏图。'); return; }
       $('#btnReDL').disabled = true; $('#btnBuild').disabled = true;
@@ -2161,29 +2141,28 @@
         schedulePreview(); statusMsg('已恢复默认参数');
       });
       // 「抽取文件图片」：从上传过的文件里取一张图填入预览，不用重新选文件
+      // 把 blob 解码成 canvas 供预览（bitmap 用完立即 close，避免常驻解码内存）
+      const canvasFromBitmap = async (blob) => {
+        const bmp = await createImageBitmap(blob);
+        const c = document.createElement('canvas');
+        c.width = bmp.width; c.height = bmp.height;
+        c.getContext('2d').drawImage(bmp, 0, 0);
+        if (bmp.close) bmp.close();
+        return c;
+      };
       document.getElementById('dbPickFromLib').addEventListener('click', async () => {
-        // 1) 本次会话最近一次上传的首张原图（最准确）
-        if (dbLastSrcCanvas) {
-          srcImg = dbLastSrcCanvas; renderPreview();
-          statusMsg('已抽取最近上传文件中的图片（原图，去糊前）');
-          return;
-        }
-        // 2) 文件库（Legado）记录里的原始图片 blob
+        // 1) 文件库（Legado）记录里的原始图片 blob
         if (db) {
           try {
             const recs = await dbAllFiles();
             const rec = (recs || []).find(r => r.blob);
             if (rec) {
-              const bmp = await createImageBitmap(rec.blob);
-              const c = document.createElement('canvas');
-              c.width = bmp.width; c.height = bmp.height;
-              c.getContext('2d').drawImage(bmp, 0, 0);
-              srcImg = c; renderPreview();
+              srcImg = await canvasFromBitmap(rec.blob); renderPreview();
               statusMsg('已从文件库抽取：' + (rec.name || '图片') + '（原图，去糊前）');
               return;
             }
           } catch (e) { /* 落入下一步 */ }
-          // 3) PDF 库的代表缩略图（去糊后）
+          // 2) PDF 库的代表缩略图（去糊后）
           try {
             const recs = await dbAll();
             const rec = (recs || []).find(r => r.thumb);
