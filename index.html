@@ -684,12 +684,12 @@
       const num = id => { const e = document.getElementById(id); return e ? parseFloat(e.value) : 0; };
       const chk = id => { const e = document.getElementById(id); return !!(e && e.checked); };
       return {
-        width: num('dbNum_width'),
-        contrast: num('dbNum_contrast'),
-        gamma: num('dbNum_gamma'),
-        sharpen: num('dbNum_sharpen'),
-        grayscale: num('dbNum_grayscale'),
-        brightness: num('dbNum_brightness'),
+        width: num('dbRng_width'),
+        contrast: num('dbRng_contrast'),
+        gamma: num('dbRng_gamma'),
+        sharpen: num('dbRng_sharpen'),
+        grayscale: num('dbRng_grayscale'),
+        brightness: num('dbRng_brightness'),
         upscale: chk('dbUpscale'),
         dither: chk('dbDither'),
         purebw: chk('dbPurebw'),
@@ -737,7 +737,7 @@
       }
       btn.classList.remove('gray');
       if (sel.length && sel.every(r => r.deblurred)) {
-        stateEl.textContent = '☑️ 选中的文件已全部去糊';
+        stateEl.textContent = '☑️ 选中文件已全部去糊';
         btn.textContent = '已去糊';
         btn.disabled = true;
       } else {
@@ -2222,7 +2222,7 @@
         c.rng.value = val;
         c.vtag.textContent = (DB_PARAMS[key].step < 1) ? val.toFixed(2) : val;
       }
-      function getVal(key) { const c = controls[key]; return c ? parseFloat(c.num.value) : DB_PARAMS[key].def; }
+      function getVal(key) { const c = controls[key]; return c ? dbClamp(parseFloat(c.rng.value), DB_PARAMS[key].min, DB_PARAMS[key].max) : DB_PARAMS[key].def; }
 
       for (const [key, p] of Object.entries(DB_PARAMS)) {
         const row = document.createElement('div');
@@ -2231,7 +2231,7 @@
           '<div class="klabel"><span>' + p.label + '</span><b id="dbv_' + key + '"></b></div>' +
           '<div class="ktip">' + p.tip + '</div>' +
           '<div class="kprow">' +
-            '<input type="number" class="knum" id="dbNum_' + key + '" min="' + p.min + '" max="' + p.max + '" step="' + p.step + '">' +
+            '<input type="number" class="knum" id="dbNum_' + key + '" step="' + p.step + '">' +
             '<input type="range" id="dbRng_' + key + '" min="' + p.min + '" max="' + p.max + '" step="' + p.step + '">' +
           '</div>';
         paramsBox.appendChild(row);
@@ -2239,18 +2239,36 @@
         const rng = row.querySelector('#dbRng_' + key);
         const vtag = row.querySelector('#dbv_' + key);
         controls[key] = { num, rng, vtag };
-        const setVal = (val) => {
-          val = dbClamp(parseFloat(val), p.min, p.max);
-          if (isNaN(val)) val = p.def;
-          num.value = (p.step < 1) ? val.toFixed(2) : val;
-          rng.value = val;
-          vtag.textContent = (p.step < 1) ? val.toFixed(2) : val;
-          if (key === 'width') syncDeviceOnManualWidth(val);
+        const fmt = (v) => (p.step < 1) ? Number(v).toFixed(2) : v;
+        // 滑块驱动：值必在范围内，输入框同步显示
+        const setFromRange = (v) => {
+          v = dbClamp(parseFloat(v), p.min, p.max);
+          num.value = fmt(v);
+          vtag.textContent = fmt(v);
+          if (key === 'width') syncDeviceOnManualWidth(v);
           schedulePreview();
         };
-        num.addEventListener('input', () => setVal(num.value));
-        rng.addEventListener('input', () => setVal(rng.value));
-        setVal(p.def);
+        // 输入框驱动：输入过程中不动滑块/生效值（允许任意数字与空），
+        // 仅「确认(失焦/回车)」后才应用；空或非法则退回「点击输入框前的数值」
+        const setFromNum = (raw) => {
+          const t = (raw == null ? '' : String(raw)).trim();
+          if (t === '') { num.value = editStart; return; }   // 空：退回点击前的数值（如 20）
+          const f = parseFloat(t);
+          if (isNaN(f)) { num.value = editStart; return; }    // 非法：退回点击前的数值
+          const ev = dbClamp(f, p.min, p.max);                // 生效值 clamp 到边界
+          rng.value = ev;                                     // 滑块停在最左/最右（或中间）
+          const snap = parseFloat(rng.value);                 // 滑块吸附后的真实生效值
+          num.value = fmt(snap);                              // 确认后输入框显示生效值（越界则显示 max/min）
+          vtag.textContent = fmt(snap);                       // 标签显示生效值
+          if (key === 'width') syncDeviceOnManualWidth(snap);
+          schedulePreview();
+        };
+        let editStart = fmt(p.def);                            // 点击输入框前的生效值，失焦空/非法时退回
+        num.addEventListener('focus', () => { editStart = fmt(parseFloat(rng.value)); });
+        num.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); num.blur(); } });
+        num.addEventListener('blur', () => setFromNum(num.value));
+        rng.addEventListener('input', () => setFromRange(rng.value));
+        setFromRange(p.def);
       }
 
       function syncDeviceOnManualWidth(val) {
