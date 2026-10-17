@@ -62,7 +62,7 @@
     .opt input { width: 20px; height: 20px; accent-color: #4f46e5; }
     .item { border-bottom: 1px solid #e5e7eb; padding: 10px 0; }
     .item .name { font-size: 14px; color: #1f2937; word-break: break-all; font-weight: 600; }
-    .item .meta { font-size: 12px; color: #9ca3af; margin: 4px 0 8px; }
+    .item .meta { font-size: 12px; color: #9ca3af; margin: 4px 0 8px; overflow-wrap: anywhere; }
     .item .ops { display: flex; gap: 8px; flex-wrap: wrap; }
     .mask { position: fixed; inset: 0; background: rgba(17,24,39,.5);
       display: none; align-items: center; justify-content: center; padding: 20px; z-index: 50; }
@@ -115,15 +115,10 @@
     .tabs .tab.active { background: #4f46e5; color: #fff; border-color: #4f46e5; font-weight: 600;
       box-shadow: 0 4px 12px rgba(79,70,229,.25); }
 
-    /* 主页面顶部去糊状态横幅 */
-    .dbbanner { display: flex; align-items: center; gap: 10px; max-width: 480px; margin: 0 auto 14px;
-      padding: 10px 14px; border-radius: 12px; font-size: 14px; cursor: pointer;
-      background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
-    .dbbanner.off { background: #f3f4f6; border-color: #e5e7eb; color: #6b7280; }
-    .dbbanner .dbb-main { display: flex; flex-direction: column; line-height: 1.35; min-width: 0; }
-    .dbbanner #dbBannerSub { font-size: 12px; opacity: .75; }
-    .dbbanner .dbb-go { margin-left: auto; font-weight: 600; color: #4f46e5; white-space: nowrap; }
-    .dbbanner.off .dbb-go { color: #6b7280; }
+    /* PDF 库去糊控制行（标题下）：状态 + 按钮，一行搞定 */
+    .dbrow { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      margin: 0 0 12px; font-size: 13px; color: #374151; }
+    .dbrow .btn { flex: none; }
 
     /* ============ 去糊设置（Kindle 漫画去糊）============ */
     .ksec { margin: 12px 0; padding-top: 12px; border-top: 1px solid #e5e7eb; }
@@ -165,11 +160,6 @@
   </div>
 
   <div id="tabMain">
-    <div id="dbBanner" class="dbbanner" title="点击调整去糊参数" onclick="switchTab('deblur')">
-      <span id="dbBannerIcon">✅</span>
-      <span class="dbb-main"><b id="dbBannerText">去糊已启用</b><span id="dbBannerSub"></span></span>
-      <span class="dbb-go">去设置 →</span>
-    </div>
     <div class="card">
     <input type="file" id="fileInput" accept=".zip,application/zip,application/x-zip-compressed">
     <input type="file" id="imgInput" accept="image/*" multiple>
@@ -306,6 +296,10 @@
 
   <div class="card">
     <h2>我的 PDF 库</h2>
+    <div class="dbrow">
+      <span id="dbLibState">✅ 去糊已启用</span>
+      <button class="btn small" id="dbLibBtn">去糊</button>
+    </div>
     <div id="library"></div>
     <div class="bulk" id="pdfBulk">
       <div class="bulk-top">
@@ -326,7 +320,7 @@
   <div id="tabDeblur" style="display:none">
     <div class="card">
       <h2>🛠️ Kindle 漫画去糊</h2>
-      <div class="legado-hint" style="margin-top:0">开启后：ZIP / 图片上传生成 PDF 时、以及 Legado 文件库合并放入 PDF 库时，会按下方参数去糊（重采样到设备宽度 + 锐化 + 对比度等），更适合墨水屏。Legado 下载阶段始终保存原图，不受影响。关闭则全程保持原图，下方控件变灰。</div>
+      <div class="legado-hint" style="margin-top:0">去糊为手动触发：ZIP / 图片上传、Legado 下载都保存原图；到下方「📚 我的 PDF 库」勾选文件，点标题旁的「去糊」按钮才按下方参数处理（重采样到设备宽度 + 锐化 + 对比度等），更适合墨水屏。关闭则不去糊，下方控件变灰。</div>
 
       <div class="ksec">
         <label class="kswitch"><input type="checkbox" id="dbEnable" checked> 启用去糊</label>
@@ -351,11 +345,10 @@
       </div>
 
       <div class="ksec">
-        <label>预览（上传一张图看去糊效果，不影响实际转换）</label>
+        <label>预览（在 PDF 库单选一个文件即自动抽取其图片；也可点下方按钮手动选图，均不影响实际转换）</label>
         <input type="file" id="dbImgInput" accept="image/*">
-        <div style="display:flex;gap:8px;margin:8px 0">
-          <button class="btn small gray" id="dbPick" style="flex:1" onclick="document.getElementById('dbImgInput').click()">测试</button>
-          <button class="btn small gray" id="dbPickFromLib" style="flex:1">📄 抽取文件图片</button>
+        <div style="margin:8px 0">
+          <button class="btn small gray" id="dbPick" style="width:100%" onclick="document.getElementById('dbImgInput').click()">测试</button>
         </div>
         <div class="kprev">
           <div class="pcell"><canvas id="dbPrevOrig"></canvas><div class="ptitle">原图</div></div>
@@ -532,12 +525,12 @@
             g.fillStyle = '#ffffff';
             g.fillRect(0, 0, w, h);
             g.drawImage(img, 0, 0, w, h);
-            let work = dbApply(c);   // Kindle 漫画去糊（关闭时返回原图）
-            const dataUrl = work.toDataURL('image/jpeg', JPEG_QUALITY);
+            // 统一为手动去糊：上传/生成 PDF 一律保存原图，去糊等用户在 PDF 库点「去糊」按钮
+            const dataUrl = c.toDataURL('image/jpeg', JPEG_QUALITY);
             if (!dataUrl || dataUrl.length < 200) {
               rej(new Error('图片过大，浏览器无法处理'));
             } else {
-              res({ dataUrl, width: work.width, height: work.height, canvas: work });
+              res({ dataUrl, width: w, height: h, canvas: c });
             }
           } catch (err) { rej(err); }
         };
@@ -689,21 +682,34 @@
       return c.toDataURL('image/jpeg', 0.7);
     }
 
-    // 主页面顶部去糊状态横幅：随时反映「当前有没有去糊、按什么参数去糊」
-    function updateDbBanner() {
-      const banner = document.getElementById('dbBanner');
+    // PDF 库标题下的去糊控制行：反映「当前有没有去糊」，并驱动按钮态
+    //   未启用       → ⬜ 去糊未启用 + 灰色「去启用」（点击跳去糊设置）
+    //   启用无选中   → ✅ 去糊已启用 + 「去糊」（点击提示先勾选）
+    //   选中含待去糊 → ✅ 去糊已启用 + 「去糊」
+    //   选中全去糊   → ☑️ 已全部去糊 + 灰色禁用「已去糊」
+    function updateDbLibBar() {
+      const stateEl = document.getElementById('dbLibState');
+      const btn = document.getElementById('dbLibBtn');
       const enableChk = document.getElementById('dbEnable');
-      if (!banner || !enableChk) return;
-      const on = enableChk.checked;
-      banner.classList.toggle('off', !on);
-      document.getElementById('dbBannerIcon').textContent = on ? '✅' : '⬜';
-      document.getElementById('dbBannerText').textContent = on ? '去糊已启用' : '去糊未启用';
-      const dev = document.getElementById('dbDevice');
-      const devOpt = dev && dev.options && dev.options[dev.selectedIndex];
-      const devTxt = devOpt ? devOpt.textContent : '';
-      document.getElementById('dbBannerSub').textContent = on
-        ? ('ZIP / 图片上传时、Legado 合并进 PDF 库时将按此去糊：' + devTxt + '，点击调整参数')
-        : '上传与合并的图片将保持原图，不做任何去糊，点击去设置';
+      if (!stateEl || !btn || !enableChk) return;
+      const sel = dbSelRecsCache || [];
+      if (!enableChk.checked) {
+        stateEl.textContent = '⬜ 去糊未启用';
+        btn.textContent = '去启用';
+        btn.disabled = false;
+        btn.classList.add('gray');
+        return;
+      }
+      btn.classList.remove('gray');
+      if (sel.length && sel.every(r => r.deblurred)) {
+        stateEl.textContent = '☑️ 选中的文件已全部去糊';
+        btn.textContent = '已去糊';
+        btn.disabled = true;
+      } else {
+        stateEl.textContent = '✅ 去糊已启用';
+        btn.textContent = '去糊';
+        btn.disabled = false;
+      }
     }
 
     async function buildPDF(images, onProgress) {
@@ -941,13 +947,15 @@
             ? '<span style="color:#059669">✅ ' + escapeHtml(rec.result || '成功') + '</span>'
             : '<span style="color:#dc2626">❌ ' + escapeHtml(rec.note || '失败') + '</span>';
           div.innerHTML =
-            '<div class="pickrow">' +
-              '<input type="checkbox"' + (on ? ' checked' : '') + '>' +
-              '<span class="name">' + icon + ' ' + escapeHtml(rec.name) + '</span>' +
-            '</div>' +
-            '<div class="meta">' + rec.createdAt + ' · ' + fmtSize(rec.size) +
-              (rec.detail ? ' · ' + escapeHtml(rec.detail) : '') + '</div>' +
-            '<div class="meta">' + badge + '</div>';
+            '<div class="body">' +
+              '<div class="pickrow">' +
+                '<input type="checkbox"' + (on ? ' checked' : '') + '>' +
+                '<span class="name">' + icon + ' ' + escapeHtml(rec.name) + '</span>' +
+              '</div>' +
+              '<div class="meta">' + rec.createdAt + ' · ' + fmtSize(rec.size) +
+                (rec.detail ? ' · ' + escapeHtml(rec.detail) : '') + '</div>' +
+              '<div class="meta">' + badge + '</div>' +
+            '</div>';
           div.onclick = () => {
             selUploads.has(rec.id) ? selUploads.delete(rec.id) : selUploads.add(rec.id);
             renderUploads();
@@ -959,6 +967,8 @@
 
     // ================= 多选状态 =================
     const selPdfs = new Set();
+    // PDF 库当前选中项的记录缓存（供去糊控制行判断：是否全部已去糊 → 禁用按钮）
+    let dbSelRecsCache = [];
     const selUploads = new Set();
     const selFiles = new Set();
     let fileSeq = 0;
@@ -1022,6 +1032,8 @@
         el.innerHTML = '<div class="empty">还没有 PDF，先转换一个 ZIP 吧</div>';
         selPdfs.clear();
         updateBulkBar('pdf', 0);
+        dbSelRecsCache = [];
+        updateDbLibBar();
         return;
       }
       el.innerHTML = '';
@@ -1031,24 +1043,34 @@
         const on = selPdfs.has(rec.id);
         div.className = 'item' + (on ? ' sel' : '');
         const thumbImg = rec.thumb ? '<img class="thumb" src="' + rec.thumb + '" onerror="this.style.display=\'none\'">' : '';
+        const deblurredBadge = rec.deblurred
+          ? ' <span style="color:#059669;font-size:12px">✅ 已去糊</span>' : '';
         div.innerHTML =
           thumbImg +
           '<div class="body">' +
             '<div class="pickrow">' +
               '<input type="checkbox"' + (on ? ' checked' : '') + '>' +
-              '<span class="name">' + escapeHtml(rec.name) + '</span>' +
+              '<span class="name">' + escapeHtml(rec.name) + deblurredBadge + '</span>' +
             '</div>' +
             '<div class="meta">' + rec.createdAt + ' · ' +
               (rec.size / 1024 / 1024).toFixed(2) + ' MB' +
               ' · ' + (rec.sent ? '✅ 已分享' : '⬜ 未分享') + '</div>' +
           '</div>';
         div.onclick = () => {
+          const wasOn = selPdfs.has(rec.id);
           selPdfs.has(rec.id) ? selPdfs.delete(rec.id) : selPdfs.add(rec.id);
           renderLibrary();
+          // 单选一个文件时：自动抽取该文件的图片到去糊设置预览（ZIP / 图片 / Legado 统一）
+          if (!wasOn && selPdfs.size === 1 && rec.blob && window.dbSetPreviewFromPdf) {
+            window.dbSetPreviewFromPdf(rec);
+          }
         };
         el.appendChild(div);
       });
       updateBulkBar('pdf', list.length);
+      // 缓存选中项，供去糊控制行判断按钮态（是否全部已去糊）
+      dbSelRecsCache = list.filter(r => selPdfs.has(r.id));
+      updateDbLibBar();
     }
 
     // ================= 文件库列表（legado 每话 PDF）=================
@@ -1072,9 +1094,8 @@
         div.dataset.id = rec.id;
         const brokenBadge = rec.broken
           ? '<span style="color:#dc2626"> ⚠️ 含坏图</span>' : '';
-        const thumbImg = rec.thumb ? '<img class="thumb" src="' + rec.thumb + '" onerror="this.style.display=\'none\'">' : '';
+        // 文件库不显示缩略图（缩略图统一在「我的 PDF 库」展示）
         div.innerHTML =
-          thumbImg +
           '<div class="body">' +
             '<div class="pickrow">' +
               '<input type="checkbox"' + (on ? ' checked' : '') + '>' +
@@ -1345,7 +1366,7 @@
           st.textContent = '✅ 已将「' + r.name + '」存入「我的 PDF 库」（未改名，可直接打开 LocalSend 分享）';
           return;
         }
-        await mergeFiles(recs);
+        await mergeFiles(recs, st);
       };
       document.getElementById('fileDownload').onclick = async () => {
         const recs = await selectedFiles();
@@ -1372,10 +1393,7 @@
     // ================= 合并多个 PDF（pdf-lib）=================
     // 合并结果存入「我的 PDF 库」，可直接 LocalSend 分享；命名与下载时一致（漫画名_范围话.pdf）
     // 合并前插入「目录」页，顺序与文件库（recs）一致：先 TOC，再按 recs 顺序拼页
-    //
-    // 去糊时机：legado 下载时存原图 PDF 进文件库；在这里（合并 → 放入 PDF 库）才做去糊：
-    //   开启去糊 → 提取每页内嵌 JPEG（jsPDF 直嵌 DCTDecode）→ 解码 → 去糊 → 重新嵌入；
-    //   关闭去糊 → 原样拷贝页面（无损、最快）。
+    // 注意：合并只做原样页面拷贝（无损、快）；去糊统一为手动——合并后到 PDF 库点「去糊」按钮。
 
     // 从 PDF 页提取内嵌 JPEG（jsPDF addImage(JPEG) 原样直嵌，字节与源图一致）；找不到返回 null
     function extractJpegFromPage(pdfDoc, page) {
@@ -1411,53 +1429,29 @@
       return { canvas: work, dataUrl: work.toDataURL('image/jpeg', 0.92) };
     }
 
-    async function mergeFiles(recs) {
+    // 合并多个 PDF 存入「我的 PDF 库」。statusEl 为调用方卡片里的状态容器（#fileMergeStatus）
+    async function mergeFiles(recs, statusEl) {
       await ensureLibs();
-      const st = document.getElementById('fileMergeStatus');
+      const st = statusEl || document.getElementById('fileMergeStatus');
+      if (!st) return;
       st.style.display = '';
       if (typeof PDFLib === 'undefined') {
         st.textContent = '⚠️ 合并所需 pdf-lib 未加载，请确认 vendor/pdf-lib.min.js 已上传。';
         return;
       }
-      const dp = dbGetParams();   // null = 不去糊（原样拷贝，最快）
-      st.textContent = (dp ? '合并并去糊中' : '合并中') + '：' + recs.length + ' 个文件…';
+      st.textContent = '合并中：' + recs.length + ' 个文件…';
       try {
         const merged = await PDFLib.PDFDocument.create();
         const startIdx = [];   // 每个 rec 在合并后（不含 TOC）的起始页（0 基）
         let acc = 0;
-        let firstProc = null;   // 首张去糊后的 canvas，供 PDF 库缩略图
-        let pageDone = 0;
         for (const r of recs) {
           const bytes = await r.blob.arrayBuffer();
           const src = await PDFLib.PDFDocument.load(bytes);
-          const n0 = merged.getPageCount();
-          if (!dp) {
-            // 不去糊：原样拷贝页面（无损、快）——与原版一致
-            const pages = await merged.copyPages(src, src.getPageIndices());
-            pages.forEach(p => merged.addPage(p));
-          } else {
-            // 去糊：逐页提取内嵌 JPEG → 解码 → 去糊 → 重新嵌入
-            const srcPages = src.getPages();
-            for (let pi = 0; pi < srcPages.length; pi++) {
-              const jpeg = extractJpegFromPage(src, srcPages[pi]);
-              if (jpeg) {
-                const proc = await jpegToDeblurred(jpeg);
-                const page = merged.addPage([proc.canvas.width, proc.canvas.height]);
-                const img = await merged.embedJpg(proc.dataUrl);
-                page.drawImage(img, { x: 0, y: 0, width: proc.canvas.width, height: proc.canvas.height });
-                if (!firstProc) firstProc = proc.canvas;
-              } else {
-                // 提不到内嵌图（非 DCTDecode 等）：原样拷贝该页，保证内容不丢
-                const cp = await merged.copyPages(src, [pi]);
-                cp.forEach(p => merged.addPage(p));
-              }
-              pageDone++;
-              st.textContent = '合并并去糊中：' + pageDone + ' 页…';
-              await new Promise(res => setTimeout(res, 0));   // 让出主线程，保持进度刷新
-            }
-          }
+          // 统一为手动去糊：合并只做原样页面拷贝（无损、快），去糊等用户在 PDF 库点「去糊」按钮
+          const pages = await merged.copyPages(src, src.getPageIndices());
           startIdx.push(acc);
-          acc += merged.getPageCount() - n0;
+          acc += pages.length;
+          pages.forEach(p => merged.addPage(p));
         }
         // ① 优先写 PDF 书签/大纲（Kindle、KOReader 侧边的目录）。
         //    这时还没有首页目录页，条目页码就是 startIdx[k]（0 基）
@@ -1497,8 +1491,7 @@
         if (bookNames.length === 1 && chaps.every(c => typeof c === 'number' && c >= 0)) {
           name = safeName(bookNames[0]) + '_' + rangeLabel(chaps) + '话.pdf';
         }
-        const mergedThumb = firstProc ? dbMakeThumb(firstProc)
-          : ((recs.find(r => r.thumb) || {}).thumb || null);
+        const mergedThumb = (recs.find(r => r.thumb) || {}).thumb || null;
         await dbPut({
           id: 'p-' + Date.now(), name, size: blob.size,
           createdAt: new Date().toLocaleString('zh-CN'), sent: false, blob, thumb: mergedThumb
@@ -1513,6 +1506,37 @@
       } catch (e) {
         st.textContent = '合并失败：' + e.message;
       }
+    }
+
+    // ================= PDF 库单条目去糊（点「去糊」按钮触发）=================
+    // ZIP / 图片 / Legado 来源统一：提取每页内嵌 JPEG → 去糊 → 重嵌，覆盖原记录。
+    // 提取失败的页（如目录页 PNG）原样拷贝，保证内容不丢。
+    async function deblurPdfRecord(rec, onProgress) {
+      if (typeof PDFLib === 'undefined') throw new Error('pdf-lib 未加载');
+      const bytes = await rec.blob.arrayBuffer();
+      const src = await PDFLib.PDFDocument.load(bytes);
+      const out = await PDFLib.PDFDocument.create();
+      const srcPages = src.getPages();
+      let firstProc = null;
+      for (let pi = 0; pi < srcPages.length; pi++) {
+        const jpeg = extractJpegFromPage(src, srcPages[pi]);
+        if (jpeg) {
+          const proc = await jpegToDeblurred(jpeg);
+          const page = out.addPage([proc.canvas.width, proc.canvas.height]);
+          const img = await out.embedJpg(proc.dataUrl);
+          page.drawImage(img, { x: 0, y: 0, width: proc.canvas.width, height: proc.canvas.height });
+          if (!firstProc) firstProc = proc.canvas;
+        } else {
+          const cp = await out.copyPages(src, [pi]);
+          cp.forEach(p => out.addPage(p));
+        }
+        if (onProgress) onProgress(pi + 1, srcPages.length);
+        await new Promise(r => setTimeout(r, 0));   // 让出主线程，刷新进度
+      }
+      const saved = await out.save();
+      const blob = new Blob([saved], { type: 'application/pdf' });
+      const thumb = firstProc ? dbMakeThumb(firstProc) : rec.thumb;
+      await dbPut({ ...rec, blob, size: blob.size, thumb, deblurred: true });
     }
 
     // ================= PDF 书签 / 大纲（/Outlines）=================
@@ -2144,13 +2168,13 @@
         const w = parseInt(v, 10);
         if (w > 0) setParam('width', w);
       }
-      deviceSel.addEventListener('change', () => { applyDevice(); schedulePreview(); updateDbBanner(); });
+      deviceSel.addEventListener('change', () => { applyDevice(); schedulePreview(); updateDbLibBar(); });
 
       function refreshEnabled() {
         const on = enableChk.checked;
         body.classList.toggle('disabled', !on);
         body.querySelectorAll('input,select').forEach(el => { if (el !== enableChk) el.disabled = !on; });
-        updateDbBanner();   // 同步主页面顶部状态横幅
+        updateDbLibBar();   // 同步 PDF 库去糊控制行
       }
       enableChk.addEventListener('change', refreshEnabled);
       refreshEnabled();
@@ -2214,45 +2238,65 @@
         document.getElementById('dbPurebw').checked = false;
         schedulePreview(); statusMsg('已恢复默认参数');
       });
-      // 「抽取文件图片」：从上传过的文件里取一张图填入预览，不用重新选文件
-      // 把 blob 解码成 canvas 供预览（bitmap 用完立即 close，避免常驻解码内存）
-      const canvasFromBitmap = async (blob) => {
-        const bmp = await createImageBitmap(blob);
-        const c = document.createElement('canvas');
-        c.width = bmp.width; c.height = bmp.height;
-        c.getContext('2d').drawImage(bmp, 0, 0);
-        if (bmp.close) bmp.close();
-        return c;
+      // 供 PDF 库单选时抽取该文件的图片到预览（ZIP / 图片 / Legado 来源统一走此路线）
+      // blob 为 PDF 文件：提取第一张内嵌 JPEG → 解码成 canvas → 填入左右对比预览
+      window.dbSetPreviewFromPdf = async (rec) => {
+        try {
+          if (typeof PDFLib === 'undefined') { statusMsg('⚠️ pdf-lib 未加载，无法抽取 PDF 内图片'); return; }
+          statusMsg('正在抽取「' + (rec.name || '') + '」的图片…');
+          const bytes = await rec.blob.arrayBuffer();
+          const pdfDoc = await PDFLib.PDFDocument.load(bytes);
+          const page = pdfDoc.getPage(0);
+          if (!page) { statusMsg('⚠️ 该 PDF 没有页面'); return; }
+          const jpeg = extractJpegFromPage(pdfDoc, page);
+          if (!jpeg) { statusMsg('⚠️ 没能从该 PDF 提取到图片（可能是目录页或非标准内嵌）'); return; }
+          const bmp = await createImageBitmap(jpeg);
+          const c = document.createElement('canvas');
+          c.width = bmp.width; c.height = bmp.height;
+          c.getContext('2d').drawImage(bmp, 0, 0);
+          if (bmp.close) bmp.close();
+          srcImg = c; renderPreview();
+          statusMsg('已抽取「' + (rec.name || '') + '」的图片（第 1 页，原图）');
+        } catch (e) { statusMsg('⚠️ 抽取失败：' + e.message); }
       };
-      document.getElementById('dbPickFromLib').addEventListener('click', async () => {
-        // 1) 文件库（Legado）记录里的原始图片 blob
-        if (db) {
-          try {
-            const recs = await dbAllFiles();
-            const rec = (recs || []).find(r => r.blob);
-            if (rec) {
-              srcImg = await canvasFromBitmap(rec.blob); renderPreview();
-              statusMsg('已从文件库抽取：' + (rec.name || '图片') + '（原图，去糊前）');
-              return;
-            }
-          } catch (e) { /* 落入下一步 */ }
-          // 2) PDF 库的代表缩略图（去糊后）
-          try {
-            const recs = await dbAll();
-            const rec = (recs || []).find(r => r.thumb);
-            if (rec) {
-              const im = new Image();
-              im.onload = () => { srcImg = im; renderPreview(); };
-              im.src = rec.thumb;
-              statusMsg('已从 PDF 库抽取代表图（去糊后缩略图）：' + (rec.name || ''));
-              return;
-            }
-          } catch (e) { /* ignore */ }
-        }
-        statusMsg('⚠️ 没找到可抽取的图片：请先上传 ZIP / 图片，或用 Legado 读取文件');
-      });
       try { const s = localStorage.getItem(DB_STORE); if (s) applyPreset(JSON.parse(s)); } catch (e) {}
-      updateDbBanner();   // 初始化主页面顶部状态横幅
+
+      // PDF 库「去糊 / 去启用」按钮：未启用 → 跳去糊设置；启用 → 对勾选的文件依次去糊
+      const dbLibBtn = document.getElementById('dbLibBtn');
+      const dbLibState = document.getElementById('dbLibState');
+      if (dbLibBtn) dbLibBtn.addEventListener('click', async () => {
+        if (!dbGetParams()) {
+          if (window.switchTab) window.switchTab('deblur');
+          statusMsg('去糊未启用：请先打开「启用去糊」开关');
+          return;
+        }
+        const ids = [...selPdfs];
+        if (!ids.length) { statusMsg('请先在 PDF 库勾选要去糊的文件（单选可自动预览效果）'); return; }
+        // 防御：选中的文件已全部去糊（按钮此时应为禁用态，双保险）
+        if (dbSelRecsCache.length && dbSelRecsCache.every(r => r.deblurred)) {
+          statusMsg('选中的文件已全部去糊，无需重复操作');
+          return;
+        }
+        dbLibBtn.disabled = true;
+        try {
+          const recs = await dbAll();
+          for (const id of ids) {
+            const rec = recs.find(r => r.id === id);
+            if (!rec || rec.deblurred) continue;   // 已去糊的跳过，避免二次去糊
+            dbLibState.textContent = '⏳ 去糊中：' + (rec.name || '') + '…';
+            await deblurPdfRecord(rec, (done, total) => {
+              dbLibState.textContent = '⏳ 去糊中：' + (rec.name || '') + '（' + done + '/' + total + ' 页）';
+            });
+          }
+          statusMsg('✅ 已完成去糊，PDF 库对应文件已更新');
+        } catch (e) {
+          dbLibState.textContent = '⚠️ 去糊失败：' + e.message;
+        } finally {
+          dbLibBtn.disabled = false;
+          renderLibrary();
+        }
+      });
+      updateDbLibBar();   // 初始化 PDF 库去糊控制行
     }
 
     (async () => {
