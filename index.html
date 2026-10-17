@@ -1396,24 +1396,64 @@
     // 注意：合并只做原样页面拷贝（无损、快）；去糊统一为手动——合并后到 PDF 库点「去糊」按钮。
 
     // 从 PDF 页提取内嵌 JPEG（jsPDF addImage(JPEG) 原样直嵌，字节与源图一致）；找不到返回 null
-    function extractJpegFromPage(pdfDoc, page) {
+    // 注意 1：jsPDF 把全书图片 XObject 放在共享 Resources（/I0、/I1…），每页内容流用
+    //   「/I0 Do」引用自己那张。必须按内容流引用取图，直接取字典第一个会所有页都拿到首页图。
+    // 注意 2：内容流可能是 FlateDecode 压缩的（pdf-lib save 默认压缩），用官方 decodePDFRawStream 解压。
+    async function extractJpegFromPage(pdfDoc, page) {
       try {
         const P = PDFLib;
+        const filterName = (dict) => {
+          const f = dict && dict.get(P.PDFName.of('Filter'));
+          if (!f) return '';
+          if (f.asArray) { const a = f.asArray()[0]; return a ? String(a).replace(/^\//, '') : ''; }
+          return String(f).replace(/^\//, '');
+        };
         const resRef = page.node.get(P.PDFName.of('Resources'));
         if (!resRef) return null;
         const res = pdfDoc.context.lookup(resRef);
         const xobjRef = res.get(P.PDFName.of('XObject'));
         if (!xobjRef) return null;
         const xobjs = pdfDoc.context.lookup(xobjRef);
-        for (const [, ref] of xobjs.entries()) {
+        if (!xobjs || !xobjs.entries) return null;
+
+        // 该页 XObject 名 → ref 的映射
+        const byName = {};
+        for (const [k, ref] of xobjs.entries()) byName[String(k).replace(/^\//, '')] = ref;
+        // 从 XObject 字典中挑出指定名字的 DCTDecode 图片
+        const pickImage = (name) => {
+          const ref = byName[name];
+          if (!ref) return null;
           const xobj = pdfDoc.context.lookup(ref);
-          if (!xobj || !xobj.dict || !xobj.contents) continue;
+          if (!xobj || !xobj.dict || !xobj.contents) return null;
           const st2 = xobj.dict.get(P.PDFName.of('Subtype'));
-          if (!st2 || String(st2).replace(/^\//, '') !== 'Image') continue;
-          const ft = xobj.dict.get(P.PDFName.of('Filter'));
-          const fn = ft ? String(ft).replace(/^\//, '') : '';
-          if (fn === 'DCTDecode') return new Blob([xobj.contents], { type: 'image/jpeg' });
+          if (!st2 || String(st2).replace(/^\//, '') !== 'Image') return null;
+          if (filterName(xobj.dict) !== 'DCTDecode') return null;
+          return new Blob([xobj.contents], { type: 'image/jpeg' });
+        };
+
+        // 读页内容流，按绘制顺序解析「/Name Do」引用
+        const contentsRef = page.node.get(P.PDFName.of('Contents'));
+        let streamText = '';
+        const collect = async (obj) => {
+          if (!obj) return;
+          if (obj.asArray) { for (const x of obj.asArray()) await collect(pdfDoc.context.lookup(x)); return; }
+          if (!obj.contents) return;
+          let bytes = obj.contents;
+          if (filterName(obj.dict) === 'FlateDecode') {
+            try { bytes = await P.decodePDFRawStream(obj).decode(); } catch (e) { bytes = null; }
+          }
+          if (bytes) streamText += new TextDecoder('latin1').decode(bytes);
+        };
+        await collect(pdfDoc.context.lookup(contentsRef));
+        const doRe = /\/([A-Za-z0-9._-]+)\s+Do/g;
+        let m;
+        while ((m = doRe.exec(streamText))) {
+          const img = pickImage(m[1]);
+          if (img) return img;
         }
+        // 注意：不要在这里兜底取字典第一个 Image——jsPDF 的 Resources 是全文档共享的，
+        // 纯文字页/目录页的内容流没有 Do 引用，兜底会把首页图错误地提出来。
+        // 解析不到（如内容流损坏）就返回 null，由调用方原样拷贝该页。
       } catch (e) { /* 落入调用方兜底 */ }
       return null;
     }
@@ -1519,7 +1559,7 @@
       const srcPages = src.getPages();
       let firstProc = null;
       for (let pi = 0; pi < srcPages.length; pi++) {
-        const jpeg = extractJpegFromPage(src, srcPages[pi]);
+        const jpeg = await extractJpegFromPage(src, srcPages[pi]);
         if (jpeg) {
           const proc = await jpegToDeblurred(jpeg);
           const page = out.addPage([proc.canvas.width, proc.canvas.height]);
@@ -2248,7 +2288,7 @@
           const pdfDoc = await PDFLib.PDFDocument.load(bytes);
           const page = pdfDoc.getPage(0);
           if (!page) { statusMsg('⚠️ 该 PDF 没有页面'); return; }
-          const jpeg = extractJpegFromPage(pdfDoc, page);
+          const jpeg = await extractJpegFromPage(pdfDoc, page);
           if (!jpeg) { statusMsg('⚠️ 没能从该 PDF 提取到图片（可能是目录页或非标准内嵌）'); return; }
           const bmp = await createImageBitmap(jpeg);
           const c = document.createElement('canvas');
