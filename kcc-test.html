@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#4f46e5">
+  <title>Kindle 漫画去糊测试 · KCC 思路</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, "PingFang SC", sans-serif;
+      background: #f3f4f6; padding: 24px 16px; overflow-x: hidden; }
+    h1 { text-align: center; color: #1f2937; margin-bottom: 4px; font-size: 22px; }
+    p.tip { text-align: center; color: #6b7280; font-size: 13px; margin-bottom: 18px; line-height: 1.6; }
+    .card { background: #fff; border-radius: 16px; padding: 24px;
+      max-width: 480px; margin: 0 auto 20px; box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+    .btn { display: inline-block; background: #4f46e5; color: #fff; border: none;
+      border-radius: 12px; padding: 12px 18px; font-size: 15px; cursor: pointer; white-space: nowrap; }
+    .btn:disabled { background: #9ca3af; cursor: not-allowed; }
+    .btn.gray { background: #6b7280; }
+    button, input, select { font-family: inherit; max-width: 100%; }
+    h2 { font-size: 17px; color: #1f2937; margin-bottom: 12px; }
+    .hint { font-size: 12px; color: #9ca3af; margin-top: 10px; line-height: 1.6; }
+
+    /* 上传区 */
+    #imgInput { display: none; }
+    .drop { border: 2px dashed #c7d2fe; border-radius: 12px; padding: 22px 14px;
+      text-align: center; color: #6b7280; font-size: 14px; cursor: pointer; background: #fafaff; }
+    .drop.over { border-color: #4f46e5; background: #eef2ff; color: #4f46e5; }
+    .meta { font-size: 12px; color: #9ca3af; margin-top: 8px; text-align: center; }
+
+    /* 设备选择 */
+    .field { margin-bottom: 14px; }
+    .field > label { display: block; font-size: 14px; color: #374151; margin-bottom: 6px; }
+    select, .num, .sel-select { width: 100%; max-width: 100%; padding: 8px 12px; font-size: 13px;
+      border: 1px solid #d1d5db; border-radius: 8px; background: #fff; color: #1f2937; }
+
+    /* 参数行：左输入框 + 右滑块 */
+    .param { margin-bottom: 12px; }
+    .param .plabel { display: flex; justify-content: space-between; font-size: 13px; color: #374151; margin-bottom: 5px; }
+    .param .plabel b { color: #4f46e5; font-weight: 600; }
+    .prow { display: flex; align-items: center; gap: 10px; }
+    .prow .num { flex: 0 0 72px; width: 72px; text-align: center; }
+    .prow input[type=range] { flex: 1 1 0; min-width: 0; accent-color: #4f46e5; }
+
+    /* 开关行 */
+    .switch { display: flex; align-items: center; gap: 10px; font-size: 14px; color: #374151; margin-bottom: 10px; }
+    .switch input { width: 18px; height: 18px; accent-color: #4f46e5; flex: none; }
+
+    .preview-wrap { margin-top: 14px; }
+    .preview-wrap canvas { width: 100%; height: auto; border-radius: 10px; border: 1px solid #e5e7eb; display: block; background: #fff; }
+    .pcap { font-size: 12px; color: #9ca3af; text-align: center; margin-top: 6px; }
+
+    #status { margin-top: 14px; color: #374151; font-size: 14px; min-height: 20px; line-height: 1.5; }
+    .bar-wrap { margin-top: 14px; display: none; }
+    .bar { height: 10px; background: #e5e7eb; border-radius: 999px; overflow: hidden; }
+    .bar-fill { height: 100%; width: 0%; border-radius: 999px;
+      background: linear-gradient(90deg, #818cf8, #4f46e5); transition: width .12s linear; }
+    #progressText { margin-top: 6px; font-size: 13px; color: #4b5563; }
+    .divider { border: none; border-top: 1px solid #e5e7eb; margin: 18px 0; }
+  </style>
+</head>
+<body>
+  <h1>📕 Kindle 漫画去糊测试</h1>
+  <p class="tip">参考 KCC（Kindle Comic Converter）思路：把图重采样到设备宽度 + 锐化 + 对比度/伽马 + 灰度抖动<br>
+  上传一张漫画图，生成「原图 · 去糊后」两页 PDF 对比</p>
+
+  <div class="card">
+    <input type="file" id="imgInput" accept="image/*">
+    <button class="btn" id="pickBtn" style="width:100%; margin-bottom:10px;">📂 选择图片</button>
+    <div class="drop" id="drop">或把图片拖拽到此处</div>
+    <div class="meta" id="meta"></div>
+    <div class="hint">提示：若点击后打不开文件选择框，说明当前预览环境禁用了系统文件框——请用 Chrome / Edge 直接打开本文件（双击 kcc-test.html，或把它拖进浏览器窗口）。</div>
+
+    <div id="panel" style="display:none">
+      <hr class="divider">
+
+      <div class="field">
+        <label>① 目标硬件（决定输出宽度）</label>
+        <select id="device" class="sel-select">
+          <option value="1072">Kindle Basic 6″ · 1072px</option>
+          <option value="1236" selected>Kindle Paperwhite 6.8″ · 1236px</option>
+          <option value="1264">Kindle Oasis 7″ · 1264px</option>
+          <option value="1860">Kindle Scribe 10.2″ · 1860px</option>
+          <option value="0">自定义宽度（用下方滑块）</option>
+        </select>
+      </div>
+
+      <div id="params"></div>
+
+      <label class="switch"><input type="checkbox" id="upscale" checked> 允许放大（原图小于目标宽度时，放大让小字更清晰）</label>
+      <label class="switch"><input type="checkbox" id="dither" checked> 灰度抖动（Floyd–Steinberg，缓解电子墨水灰阶断层）</label>
+      <label class="switch"><input type="checkbox" id="purebw"> 纯黑白（1-bit 阈值，文字最锐，但丢失灰阶）</label>
+
+      <hr class="divider">
+
+      <div class="preview-wrap">
+        <canvas id="preview"></canvas>
+        <div class="pcap">实时预览：去糊后的效果（调参即时更新）</div>
+      </div>
+
+      <div class="row" style="display:flex; gap:8px; margin-top:16px;">
+        <button class="btn gray" id="resetBtn" style="flex:1">恢复默认</button>
+        <button class="btn" id="genBtn" style="flex:1.6">生成两页 PDF</button>
+      </div>
+    </div>
+
+    <div id="status"></div>
+    <div class="bar-wrap" id="barWrap">
+      <div class="bar"><div class="bar-fill" id="barFill"></div></div>
+      <div id="progressText"></div>
+    </div>
+  </div>
+
+  <script src="vendor/pdf-lib.min.js"></script>
+  <script>
+  // ============ 参数定义（左输入框 + 右滑块）============
+  // 每个参数：min/max/step/def/label。device 选择会覆盖 width 的默认值。
+  const PARAMS = {
+    width:      { min:300, max:2000, step:1,   def:1236, label:'目标宽度 (px)' },
+    contrast:   { min:-100, max:100,  step:1,   def:20,   label:'对比度' },
+    gamma:      { min:0.5,  max:2,    step:0.05,def:1.0,  label:'伽马 (Gamma)' },
+    sharpen:    { min:0,    max:200,  step:1,   def:100,  label:'锐化强度' },
+    grayscale:  { min:0,    max:100,  step:1,   def:0,    label:'黑白度 (灰度混合)' },
+    brightness: { min:-100, max:100,  step:1,   def:0,    label:'亮度' },
+  };
+  const DEFAULTS = Object.fromEntries(Object.entries(PARAMS).map(([k,v])=>[k,v.def]));
+
+  // ============ 构建参数 UI ============
+  const paramsBox = document.getElementById('params');
+  const controls = {}; // key -> {num, range}
+  for (const [key, p] of Object.entries(PARAMS)) {
+    const row = document.createElement('div');
+    row.className = 'param';
+    row.innerHTML = `
+      <div class="plabel"><span>${p.label}</span><b id="v_${key}"></b></div>
+      <div class="prow">
+        <input type="number" class="num" id="num_${key}" min="${p.min}" max="${p.max}" step="${p.step}">
+        <input type="range" id="rng_${key}" min="${p.min}" max="${p.max}" step="${p.step}">
+      </div>`;
+    paramsBox.appendChild(row);
+    const num = row.querySelector('#num_'+key);
+    const rng = row.querySelector('#rng_'+key);
+    const vtag = row.querySelector('#v_'+key);
+    controls[key] = { num, rng, vtag };
+    const setVal = (val, fromNum) => {
+      val = clamp(parseFloat(val), p.min, p.max);
+      if (isNaN(val)) val = p.def;
+      num.value = (p.step < 1) ? val.toFixed(2) : val;
+      rng.value = val;
+      vtag.textContent = (p.step < 1) ? val.toFixed(2) : val;
+      // width 改变时，若选择的是具体设备，则同步更新 device 选择为“自定义”
+      if (key === 'width') syncDeviceOnManualWidth(val);
+    };
+    num.addEventListener('input', () => { setVal(num.value); schedulePreview(); });
+    rng.addEventListener('input', () => { setVal(rng.value); schedulePreview(); });
+    setVal(p.def);
+  }
+
+  // 设备选择 → 同步宽度
+  const deviceSel = document.getElementById('device');
+  function applyDevice() {
+    const w = parseInt(deviceSel.value, 10);
+    if (w > 0) { setParam('width', w); }
+  }
+  function syncDeviceOnManualWidth(val) {
+    const w = parseInt(deviceSel.value, 10);
+    if (w > 0 && val !== w) deviceSel.value = '0';
+  }
+  deviceSel.addEventListener('change', () => { applyDevice(); schedulePreview(); });
+  function setParam(key, val) {
+    const c = controls[key];
+    val = clamp(val, PARAMS[key].min, PARAMS[key].max);
+    c.num.value = (PARAMS[key].step < 1) ? val.toFixed(2) : val;
+    c.rng.value = val;
+    c.vtag.textContent = (PARAMS[key].step < 1) ? val.toFixed(2) : val;
+  }
+  function getParams() {
+    const o = {};
+    for (const k in PARAMS) o[k] = parseFloat(controls[k].num.value);
+    o.upscale = document.getElementById('upscale').checked;
+    o.dither  = document.getElementById('dither').checked;
+    o.pureBW  = document.getElementById('purebw').checked;
+    return o;
+  }
+
+  // ============ 上传 ============
+  const imgInput = document.getElementById('imgInput');
+  const drop = document.getElementById('drop');
+  const meta = document.getElementById('meta');
+  const panel = document.getElementById('panel');
+  const preview = document.getElementById('preview');
+  const statusEl = document.getElementById('status');
+  let srcImg = null;
+  let origCanvas = null;   // 原图（同尺寸缩放，便于公平对比）
+  let procCanvas = null;   // 去糊后
+
+  drop.addEventListener('click', () => imgInput.click());
+  document.getElementById('pickBtn').addEventListener('click', () => imgInput.click());
+  imgInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+  ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e=>{e.preventDefault();drop.classList.add('over');}));
+  ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e=>{e.preventDefault();drop.classList.remove('over');}));
+  drop.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) loadFile(f); });
+
+  function loadFile(file) {
+    if (!file.type.startsWith('image/')) { status('⚠️ 请上传图片文件'); return; }
+    const url = URL.createObjectURL(file);
+    const im = new Image();
+    im.onload = () => {
+      srcImg = im;
+      meta.textContent = `已载入：${file.name} · ${im.naturalWidth}×${im.naturalHeight}px · ${(file.size/1024).toFixed(0)} KB`;
+      panel.style.display = 'block';
+      applyDevice();
+      render();   // 首次渲染
+      status('已就绪，调参后点「生成两页 PDF」');
+    };
+    im.onerror = () => status('⚠️ 图片解码失败');
+    im.src = url;
+  }
+
+  // ============ 工具函数 ============
+  const clamp = (v,a,b) => Math.min(b, Math.max(a, v));
+  const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
+  const clamp255 = v => v < 0 ? 0 : v > 255 ? 255 : v;
+
+  // 重采样到目标宽度（高质量，避免 Kindle 端二次放大发糊）
+  function resizeTo(src, targetW, allowUpscale) {
+    const w0 = src.naturalWidth || src.width;
+    const h0 = src.naturalHeight || src.height;
+    let tw = targetW;
+    if (!allowUpscale && tw > w0) tw = w0;
+    const th = Math.max(1, Math.round(h0 * tw / w0));
+    const c = document.createElement('canvas');
+    c.width = tw; c.height = th;
+    const x = c.getContext('2d');
+    x.imageSmoothingEnabled = true;
+    x.imageSmoothingQuality = 'high';
+    x.drawImage(src, 0, 0, tw, th);
+    return c;
+  }
+
+  // 可分离盒式模糊（锐化用）
+  function boxBlur(src, W, H, r) {
+    const tmp = new Float32Array(src.length);
+    const out = new Float32Array(src.length);
+    const win = r * 2 + 1;
+    // 横向
+    for (let y = 0; y < H; y++) {
+      let sum = 0;
+      for (let x = -r; x <= r; x++) sum += src[y*W + clamp(x,0,W-1)];
+      for (let x = 0; x < W; x++) {
+        tmp[y*W + x] = sum / win;
+        const add = src[y*W + clamp(x + r + 1,0,W-1)];
+        const sub = src[y*W + clamp(x - r,0,W-1)];
+        sum += add - sub;
+      }
+    }
+    // 纵向
+    for (let x = 0; x < W; x++) {
+      let sum = 0;
+      for (let y = -r; y <= r; y++) sum += tmp[clamp(y,0,H-1)*W + x];
+      for (let y = 0; y < H; y++) {
+        out[y*W + x] = sum / win;
+        const add = tmp[clamp(y + r + 1,0,H-1)*W + x];
+        const sub = tmp[clamp(y - r,0,H-1)*W + x];
+        sum += add - sub;
+      }
+    }
+    return out;
+  }
+
+  // Floyd–Steinberg 抖动（就地量化到 levels 级灰阶）
+  function fsDither(buf, W, H, levels) {
+    const step = 255 / (levels - 1);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = y*W + x;
+        const old = buf[i];
+        let q = Math.round(old / step) * step;
+        if (q > 255) q = 255; if (q < 0) q = 0;
+        const err = old - q;
+        buf[i] = q;
+        if (x+1 < W) buf[i+1] += err * 7/16;
+        if (y+1 < H) {
+          if (x-1 >= 0) buf[i+W-1] += err * 3/16;
+          buf[i+W]     += err * 5/16;
+          if (x+1 < W)  buf[i+W+1] += err * 1/16;
+        }
+      }
+    }
+  }
+
+  // 核心：在原图 canvas 上做去糊处理，返回新 canvas
+  function enhance(srcCanvas, p) {
+    const W = srcCanvas.width, H = srcCanvas.height;
+    const out = document.createElement('canvas');
+    out.width = W; out.height = H;
+    const octx = out.getContext('2d');
+    octx.drawImage(srcCanvas, 0, 0);
+    const ctx = out.getContext('2d');
+    const id = ctx.getImageData(0, 0, W, H);
+    const d = id.data;
+    const n = W * H;
+    const r = new Float32Array(n), g = new Float32Array(n), b = new Float32Array(n);
+    for (let i = 0; i < n; i++) { r[i]=d[i*4]; g[i]=d[i*4+1]; b[i]=d[i*4+2]; }
+
+    // 亮度 → 对比度 → 伽马
+    const br = p.brightness * 2.55;
+    const Cf = (259 * (p.contrast + 255)) / (255 * (259 - p.contrast));
+    const ga = p.gamma;
+    const mix = p.grayscale / 100;
+    for (let i = 0; i < n; i++) {
+      let R = r[i]+br, G = g[i]+br, B = b[i]+br;
+      R = (R-128)*Cf+128; G = (G-128)*Cf+128; B = (B-128)*Cf+128;
+      R = 255*Math.pow(clamp01(R/255), ga);
+      G = 255*Math.pow(clamp01(G/255), ga);
+      B = 255*Math.pow(clamp01(B/255), ga);
+      if (mix > 0) {
+        const lum = 0.299*R + 0.587*G + 0.114*B;
+        R = R*(1-mix)+lum*mix; G = G*(1-mix)+lum*mix; B = B*(1-mix)+lum*mix;
+      }
+      r[i]=R; g[i]=G; b[i]=B;
+    }
+
+    // 锐化（非锐化掩蔽）：原图 + amount*(原图 - 模糊)
+    if (p.sharpen > 0) {
+      const amt = p.sharpen / 100;
+      const rb = boxBlur(r, W, H, 2), gb = boxBlur(g, W, H, 2), bb = boxBlur(b, W, H, 2);
+      for (let i = 0; i < n; i++) {
+        r[i] = clamp255(r[i] + amt*(r[i]-rb[i]));
+        g[i] = clamp255(g[i] + amt*(g[i]-gb[i]));
+        b[i] = clamp255(b[i] + amt*(b[i]-bb[i]));
+      }
+    }
+
+    // 抖动（仅在含灰度时）：对亮度做 FS 量化，再按 mix 混合回彩色
+    const levels = p.pureBW ? 2 : 16;
+    if (p.dither && (mix > 0 || p.pureBW)) {
+      const gray = new Float32Array(n);
+      for (let i = 0; i < n; i++) gray[i] = 0.299*r[i] + 0.587*g[i] + 0.114*b[i];
+      fsDither(gray, W, H, levels);
+      for (let i = 0; i < n; i++) {
+        if (p.pureBW) { r[i]=g[i]=b[i]=gray[i]; }
+        else { r[i]=r[i]*(1-mix)+gray[i]*mix; g[i]=g[i]*(1-mix)+gray[i]*mix; b[i]=b[i]*(1-mix)+gray[i]*mix; }
+      }
+    }
+
+    for (let i = 0; i < n; i++) { d[i*4]=r[i]; d[i*4+1]=g[i]; d[i*4+2]=b[i]; }
+    ctx.putImageData(id, 0, 0);
+    return out;
+  }
+
+  // ============ 渲染（预览 + 缓存两页 canvas）============
+  let previewTimer = null;
+  function schedulePreview() { clearTimeout(previewTimer); previewTimer = setTimeout(render, 120); }
+  function render() {
+    if (!srcImg) return;
+    const p = getParams();
+    origCanvas = resizeTo(srcImg, p.width, p.upscale);      // 原图：同尺寸缩放（不增强）
+    procCanvas = enhance(origCanvas, p);                    // 去糊后
+    // 预览：缩放到显示宽度
+    const maxW = preview.clientWidth || 400;
+    const scale = Math.min(1, maxW / procCanvas.width);
+    preview.width = Math.round(procCanvas.width * scale);
+    preview.height = Math.round(procCanvas.height * scale);
+    const px = preview.getContext('2d');
+    px.imageSmoothingEnabled = true; px.imageSmoothingQuality = 'high';
+    px.drawImage(procCanvas, 0, 0, preview.width, preview.height);
+  }
+
+  // 窗口尺寸变化时重画预览
+  window.addEventListener('resize', () => { if (srcImg) render(); });
+
+  // ============ 生成 PDF ============
+  const genBtn = document.getElementById('genBtn');
+  const barWrap = document.getElementById('barWrap');
+  const barFill = document.getElementById('barFill');
+  const progressText = document.getElementById('progressText');
+
+  genBtn.addEventListener('click', async () => {
+    if (!origCanvas || !procCanvas) { status('⚠️ 请先上传图片'); return; }
+    genBtn.disabled = true;
+    barWrap.style.display = 'block';
+    try {
+      await ensurePdfLib();
+      const doc = await PDFLib.PDFDocument.create();
+      const pages = [
+        { cv: origCanvas, tag: 'orig' },
+        { cv: procCanvas, tag: 'proc' },
+      ];
+      for (let k = 0; k < pages.length; k++) {
+        const { cv, tag } = pages[k];
+        const bytes = await canvasToBytes(cv, 'image/jpeg', 0.92);
+        const img = await doc.embedJpg(bytes);
+        const page = doc.addPage([cv.width, cv.height]);
+        page.drawImage(img, { x:0, y:0, width: cv.width, height: cv.height });
+        barFill.style.width = ((k+1)/pages.length*100) + '%';
+        progressText.textContent = (tag==='orig'?'已写入原图页':'已写入去糊页') + `（${cv.width}×${cv.height}px）`;
+      }
+      const out = await doc.save();
+      download(new Blob([out], { type:'application/pdf' }), 'kindle-kcc-demo.pdf');
+      status('✅ 已生成两页 PDF：第 1 页原图，第 2 页去糊后。两张同尺寸，方便对比。');
+    } catch (e) {
+      status('⚠️ 生成失败：' + e.message);
+    } finally {
+      genBtn.disabled = false;
+    }
+  });
+
+  function canvasToBytes(canvas, type, q) {
+    return new Promise((res, rej) => {
+      canvas.toBlob(b => b ? b.arrayBuffer().then(ab => res(new Uint8Array(ab))) : rej(new Error('toBlob 失败')), type, q);
+    });
+  }
+  function download(blob, name) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }
+  function status(t) { statusEl.textContent = t; }
+
+  // pdf-lib 兜底：本地 vendor 缺失时从 CDN 加载
+  function ensurePdfLib() {
+    if (typeof PDFLib !== 'undefined' && PDFLib.PDFDocument) return Promise.resolve();
+    return new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js';
+      s.onload = () => (typeof PDFLib !== 'undefined' ? res() : rej(new Error('pdf-lib 加载失败')));
+      s.onerror = () => rej(new Error('pdf-lib CDN 加载失败'));
+      document.head.appendChild(s);
+    });
+  }
+  // 若主 script 同步加载失败，给出提示（打开方式需与 vendor 同目录）
+  window.addEventListener('load', () => {
+    if (typeof PDFLib === 'undefined') {
+      status('提示：pdf-lib 未加载，请确认 kcc-test.html 与 vendor/pdf-lib.min.js 在同一目录；生成时将从 CDN 兜底。');
+    }
+  });
+
+  // ============ 恢复默认 ============
+  document.getElementById('resetBtn').addEventListener('click', () => {
+    for (const k in DEFAULTS) setParam(k, DEFAULTS[k]);
+    document.getElementById('upscale').checked = true;
+    document.getElementById('dither').checked = true;
+    document.getElementById('purebw').checked = false;
+    deviceSel.value = '1236';
+    applyDevice();
+    if (srcImg) render();
+    status('已恢复默认参数');
+  });
+  </script>
+</body>
+</html>
