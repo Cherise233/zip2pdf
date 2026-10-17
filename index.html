@@ -139,6 +139,15 @@
     .kswitch input:checked + .track::before { transform: translateX(20px); }
     .kswitch input:focus-visible + .track { box-shadow: 0 0 0 3px rgba(79,70,229,.35); }
     .kswitch .txt { font-size: 14px; color: #374151; }
+    .kswitch input:disabled + .track { opacity: .5; }
+    .kswitch input:disabled ~ .txt { opacity: .6; }
+    /* 去糊面板「开关」区三个复选项：原生 checkbox，尺寸/字号统一（3 个一致） */
+    .kcheck { display: flex; align-items: flex-start; gap: 9px; font-size: 13px; line-height: 1.5;
+      color: #374151; cursor: pointer; margin: 11px 0; }
+    .kcheck input[type=checkbox] { flex: none; width: 18px; height: 18px; margin: 1px 0 0;
+      accent-color: #4f46e5; cursor: pointer; }
+    #kBody.disabled .kcheck { opacity: .55; }
+    #kBody.disabled .kcheck input { cursor: not-allowed; }
     .krow { margin: 12px 0; }
     .klabel { display: flex; justify-content: space-between; font-size: 13px; color: #374151; margin-bottom: 5px; }
     .klabel b { color: #4f46e5; font-weight: 600; }
@@ -350,6 +359,13 @@
         <label class="kswitch"><input type="checkbox" id="dbEnable" checked><span class="track"></span><span class="txt">启用去糊</span></label>
       </div>
 
+      <div class="ksec">
+        <div class="row" style="margin-bottom:8px">
+          <input type="number" id="dbThreads" value="4" min="1" max="16" style="flex:0 0 72px;width:72px;text-align:center;border:1px solid #d1d5db;border-radius:8px;padding:8px 6px;font-family:inherit;font-size:13px">
+          <span style="font-size:12px;color:#9ca3af;flex:1;line-height:1.5">并行线程数（去糊加速）：高→多页同时去糊更快、充分利用多核；低→更省内存、单线程更稳。建议 2~4。</span>
+        </div>
+      </div>
+
       <div class="ksec" id="kBody">
         <label style="display:block;margin-bottom:6px">目标硬件（决定重采样宽度）</label>
         <select id="dbDevice" class="sel-select" style="margin-bottom:10px">
@@ -363,9 +379,9 @@
         <div id="kParams"></div>
 
         <label style="display:block;margin:14px 0 6px">开关</label>
-        <label class="opt"><input type="checkbox" id="dbUpscale" checked> 允许放大（原图小于目标宽度时放大，让小字更清晰）</label>
-        <label class="opt"><input type="checkbox" id="dbDither"> 灰度抖动（量化灰阶时减少断层，黑白屏更平滑；计算量大，卡顿时可关掉）</label>
-        <label class="opt"><input type="checkbox" id="dbPurebw"> 纯黑白 1-bit（文字/线稿最锐，但丢失灰阶）</label>
+        <label class="kcheck"><input type="checkbox" id="dbUpscale" checked>允许放大（原图小于目标宽度时放大，让小字更清晰）</label>
+        <label class="kcheck"><input type="checkbox" id="dbDither" checked>灰度抖动（量化灰阶时减少断层，黑白屏更平滑；计算量大，卡顿时可关掉）</label>
+        <label class="kcheck"><input type="checkbox" id="dbPurebw">纯黑白 1-bit（文字/线稿最锐，但丢失灰阶）</label>
       </div>
 
       <div class="ksec">
@@ -618,16 +634,10 @@
       return out;
     }
 
-    // 增强：亮度 → 灰度混合 → 对比度 → 伽马 → 锐化 → 抖动/黑白
-    // 单遍化：全程只在内存中的一份 ImageData 上顺序处理，最后一次性 putImageData。
-    // （旧实现每步各做一次 get/putImageData，全图内存往返 4 次；在 legado 并发
-    //  取图时是卡顿主因之一。行为等价：Uint8ClampedArray 赋值自带 clamp+round。）
-    function dbEnhance(canvas, p) {
-      const W = canvas.width, H = canvas.height;
-      if (!W || !H) return canvas;
-      const g = canvas.getContext('2d');
-      const img = g.getImageData(0, 0, W, H);
-      const d = img.data;
+    // 增强核心（纯数据版，不依赖 canvas）：亮度 → 灰度混合 → 对比度 → 伽马 → 锐化 → 抖动/黑白
+    // 单遍化：全程只在传入的一份 Uint8ClampedArray 上顺序处理、原地修改。
+    // 与 dbEnhance 共享同一份算法；此版可被 Web Worker 调用（无 DOM 依赖）。
+    function dbEnhanceCore(d, W, H, p) {
       const b = (p.brightness || 0) / 100 * 255;
       const c = (p.contrast || 0) / 100;
       const cf = (259 * (c * 255 + 255)) / (255 * (259 - c * 255));
@@ -673,7 +683,96 @@
           if (y + 1 < H) { if (x - 1 >= 0) d[i + 4 * W - 4] += err * 3 / 16; d[i + 4 * W] += err * 5 / 16; if (x + 1 < W) d[i + 4 * W + 4] += err * 1 / 16; }
         }
       }
+      return d;
+    }
+
+    // 增强（canvas 版）：取 ImageData → 核心 → 写回，供预览等同步路径复用
+    function dbEnhance(canvas, p) {
+      const W = canvas.width, H = canvas.height;
+      if (!W || !H) return canvas;
+      const g = canvas.getContext('2d');
+      const img = g.getImageData(0, 0, W, H);
+      dbEnhanceCore(img.data, W, H, p);
       g.putImageData(img, 0, 0);   // 唯一一次写回
+      return canvas;
+    }
+
+    // ================= 去糊并行（Web Worker 池，dbThreads 控制并发） =================
+    // 内联 Worker 源码：注入 dbClamp / dbBoxBlurGray / dbEnhanceCore 三份「与主线程同源」的纯函数。
+    // localhost 下 Blob Worker 可用（本应用的 sw.js 即证明运行在 localhost/https）；
+    // 若创建失败则整池 fallback 到主线程同步，功能不退化。
+    const DB_WORKER_SRC = dbClamp.toString() + '\n' + dbBoxBlurGray.toString() + '\n' + dbEnhanceCore.toString() + `
+    self.onmessage = function(e){
+      const m = e.data;
+      try {
+        dbEnhanceCore(m.data, m.width, m.height, m.p);
+        self.postMessage({ id: m.id, data: m.data }, [m.data.buffer]);
+      } catch (err) { self.postMessage({ id: m.id, err: String(err) }); }
+    };`;
+
+    let _dbPool = null;
+    function dbEnhancePool() {
+      if (_dbPool) return _dbPool;
+      const pool = { workers: [], queue: [], fallback: false, seq: 0 };
+      try {
+        const url = URL.createObjectURL(new Blob([DB_WORKER_SRC], { type: 'application/javascript' }));
+        for (let i = 0; i < 16; i++) {
+          const w = new Worker(url);
+          w._busy = false; w._job = null;
+          w.onmessage = (ev) => {
+            const { id, data, err } = ev.data; const j = w._job;
+            w._busy = false; w._job = null;
+            if (err) j.rej(new Error(err)); else j.res(data);
+            dbPump(pool);
+          };
+          w.onerror = (ev) => {
+            const j = w._job; w._busy = false; w._job = null;
+            if (j) j.rej(new Error(ev.message || 'worker error'));
+            dbPump(pool);
+          };
+          pool.workers.push(w);
+        }
+      } catch (e) { pool.fallback = true; }
+      _dbPool = pool;
+      return pool;
+    }
+    function dbPump(pool) {
+      if (pool.fallback) {   // 主线程兜底：同步处理队列（行为与旧版一致）
+        while (pool.queue.length) {
+          const t = pool.queue.shift();
+          try { dbEnhanceCore(t.req.data, t.req.width, t.req.height, t.req.p); t.res(t.req.data); }
+          catch (e) { t.rej(e); }
+        }
+        return;
+      }
+      const n = dbGetThreads();
+      for (let k = 0; k < pool.workers.length; k++) {
+        const w = pool.workers[k];
+        if (k >= n) break;                 // 仅启用前 n 个 worker（并发数 = 并行线程数设置）
+        if (w._busy || !pool.queue.length) continue;
+        const t = pool.queue.shift();
+        w._busy = true; w._job = t;
+        try { w.postMessage(t.req, [t.req.data.buffer]); }   // Transferable 零拷贝
+        catch (e2) { w.postMessage(t.req); }                // 旧环境不支持 transfer 时退回拷贝
+      }
+    }
+    // 异步增强：把一页的像素交给 worker 池（或 fallback 主线程），返回处理后的 Uint8ClampedArray
+    function dbEnhanceAsync(data, W, H, p) {
+      const pool = dbEnhancePool();
+      return new Promise((res, rej) => {
+        pool.queue.push({ req: { id: pool.seq++, width: W, height: H, data, p }, res, rej });
+        dbPump(pool);
+      });
+    }
+    // 异步版 dbApply：主线程完成 resize/prepare，增强并行交给 worker 池；与 dbApply 行为等价
+    async function dbApplyAsync(canvas, p) {
+      if (!canvas) return canvas;
+      if (!p) return canvas;
+      if (p.width > 0) canvas = dbResizeToWidth(canvas, p.width, p.upscale);
+      const g = canvas.getContext('2d');
+      const img = g.getImageData(0, 0, canvas.width, canvas.height);
+      const out = await dbEnhanceAsync(img.data, canvas.width, canvas.height, p);
+      g.putImageData(new ImageData(out, canvas.width, canvas.height), 0, 0);
       return canvas;
     }
 
@@ -1513,7 +1612,8 @@
       c.width = bmp.width; c.height = bmp.height;
       c.getContext('2d').drawImage(bmp, 0, 0);
       if (bmp.close) bmp.close();
-      const work = dbApply(c);   // dbApply 内部读开关：关闭时原样返回
+      const p = dbGetParams();
+      const work = await dbApplyAsync(c, p);   // 走 worker 池并行增强（无 worker 时回退主线程同步）
       return { canvas: work, dataUrl: work.toDataURL('image/jpeg', 0.92) };
     }
 
@@ -1605,15 +1705,22 @@
       const src = await PDFLib.PDFDocument.load(bytes);
       const out = await PDFLib.PDFDocument.create();
       const srcPages = src.getPages();
+      const N = dbGetThreads();   // 并发数 = 并行线程数设置
+      // 并发处理：每页 prepare(主线程解码/resize)→enhance(worker 并行)→收尾(主线程)，结果按序落库
+      const results = await mapLimit(srcPages, N, async (page) => {
+        const jpeg = await extractJpegFromPage(src, page);
+        if (!jpeg) return { proc: null };
+        const proc = await jpegToDeblurred(jpeg);
+        return { proc };
+      });
       let firstProc = null;
       for (let pi = 0; pi < srcPages.length; pi++) {
-        const jpeg = await extractJpegFromPage(src, srcPages[pi]);
-        if (jpeg) {
-          const proc = await jpegToDeblurred(jpeg);
-          const page = out.addPage([proc.canvas.width, proc.canvas.height]);
-          const img = await out.embedJpg(proc.dataUrl);
-          page.drawImage(img, { x: 0, y: 0, width: proc.canvas.width, height: proc.canvas.height });
-          if (!firstProc) firstProc = proc.canvas;
+        const r = results[pi];
+        if (r.proc) {
+          const page = out.addPage([r.proc.canvas.width, r.proc.canvas.height]);
+          const img = await out.embedJpg(r.proc.dataUrl);
+          page.drawImage(img, { x: 0, y: 0, width: r.proc.canvas.width, height: r.proc.canvas.height });
+          if (!firstProc) firstProc = r.proc.canvas;
         } else {
           const cp = await out.copyPages(src, [pi]);
           cp.forEach(p => out.addPage(p));
@@ -1621,6 +1728,17 @@
         if (onProgress) onProgress(pi + 1, srcPages.length);
         await new Promise(r => setTimeout(r, 0));   // 让出主线程，刷新进度
       }
+      // ② 保留源 PDF 的 /Outlines 书签（目录）到去糊后的新 PDF，页码按 1:1 重映射。
+      //    源本来没目录则直接跳过；若复制过程异常，清掉可能写了一半的大纲避免残缺目录。
+      try {
+        copyPdfOutline(src, out);
+      } catch (oe) {
+        try {
+          out.catalog.delete(PDFLib.PDFName.of('Outlines'));
+          out.catalog.delete(PDFLib.PDFName.of('PageMode'));
+        } catch (_) {}
+      }
+
       const saved = await out.save();
       const blob = new Blob([saved], { type: 'application/pdf' });
       const thumb = firstProc ? dbMakeThumb(firstProc) : rec.thumb;
@@ -1668,6 +1786,146 @@
       doc.catalog.set(P.PDFName.of('PageMode'), P.PDFName.of('UseOutlines')); // 打开即显示目录栏
       return true;
     }
+
+    // 把源 PDF 的 /Outlines 书签（目录）整棵子树复制到目标 PDF，并把每个书签指向的页码
+    // 重新映射到目标文档里对应的页。目标页顺序必须与源一致（去糊：输出页索引 == 源页索引）。
+    // 支持任意层级嵌套、中文标题（PDFHexString UTF-16BE）、Dest 数组与 GoTo 动作。
+    function copyPdfOutline(srcDoc, dstDoc) {
+      const P = PDFLib;
+      if (!P || !P.PDFName || !P.PDFHexString || !P.PDFNumber) return false;
+      const srcOutlineRef = srcDoc.catalog.get(P.PDFName.of('Outlines'));
+      if (!srcOutlineRef) return false;                       // 源本来就没目录，直接跳过
+      const srcRoot = srcDoc.context.lookup(srcOutlineRef);
+      if (!srcRoot) return false;
+      const srcFirst = srcRoot.get(P.PDFName.of('First'));
+      if (!srcFirst) return false;
+
+      // 源页 ref → 源页索引；目标页索引 → 目标页 ref（去糊后顺序一致，故同索引即同页）
+      const srcPages = srcDoc.getPages();
+      const srcIdx = new Map();
+      srcPages.forEach((pg, i) => srcIdx.set(refKey(pg.ref), i));
+      const dstPages = dstDoc.getPages();
+      const dstRefOf = (i) => (dstPages[i] ? dstPages[i].ref : null);
+
+      const ctx = dstDoc.context;
+
+      // 把目标页引用 + 其余 fit 参数拼成新 Dest 数组；映射不到则返回 null
+      function remapDestArray(arr) {
+        if (!arr || !arr.asArray) return null;
+        const a = arr.asArray();
+        if (!a.length) return null;
+        const sr = a[0];
+        if (!sr || sr.objectNumber == null) return null;       // 首个元素不是页引用
+        const k = srcIdx.get(refKey(sr));
+        const dr = k == null ? null : dstRefOf(k);
+        if (!dr) return null;
+        const na = ctx.obj([]);
+        na.push(dr);
+        for (let j = 1; j < a.length; j++) na.push(a[j]);
+        return na;
+      }
+
+      // 递归统计 firstRef 起的条目总数（含所有层级）
+      function countItems(fRef) {
+        let total = 0;
+        const seen = new Set();
+        let cur = fRef;
+        while (cur && !seen.has(refKey(cur))) {
+          seen.add(refKey(cur));
+          const it = srcDoc.context.lookup(cur);
+          total += 1;
+          if (it) {
+            const ch = it.get(P.PDFName.of('First'));
+            if (ch) total += countItems(ch);
+            cur = it.get(P.PDFName.of('Next'));
+          } else cur = null;
+        }
+        return total;
+      }
+
+      // 递归构建一条目及其子条目；parentRef 为其父（根或另一条目）在目标文档的 ref
+      function buildItem(srcItemRef, parentRef) {
+        const it = srcDoc.context.lookup(srcItemRef);
+        if (!it) return null;
+        const dict = ctx.obj({});
+        const title = it.get(P.PDFName.of('Title'));
+        if (title) dict.set(P.PDFName.of('Title'), title);
+
+        // 目的地：优先 Dest 数组；其次 GoTo 动作的 /D
+        let dstDest = remapDestArray(it.get(P.PDFName.of('Dest')));
+        if (!dstDest) {
+          const act = it.get(P.PDFName.of('A'));
+          if (act && act.dict) {
+            const s = act.dict.get(P.PDFName.of('S'));
+            if (s && String(s).replace(/^\//, '') === 'GoTo') {
+              dstDest = remapDestArray(act.dict.get(P.PDFName.of('D')));
+            }
+          }
+        }
+        if (dstDest) dict.set(P.PDFName.of('Dest'), dstDest);
+
+        // 子条目
+        const childFirst = it.get(P.PDFName.of('First'));
+        const childRefs = [];
+        if (childFirst) {
+          const seen = new Set();
+          let cur = childFirst;
+          while (cur && !seen.has(refKey(cur))) {
+            seen.add(refKey(cur));
+            const built = buildItem(cur, null);
+            if (built) childRefs.push(built);
+            const ci = srcDoc.context.lookup(cur);
+            cur = ci ? ci.get(P.PDFName.of('Next')) : null;
+          }
+        }
+        const ref = ctx.register(dict);
+        if (childRefs.length) {
+          childRefs.forEach(cr => ctx.lookup(cr).set(P.PDFName.of('Parent'), ref));
+          dict.set(P.PDFName.of('First'), childRefs[0]);
+          dict.set(P.PDFName.of('Last'), childRefs[childRefs.length - 1]);
+          dict.set(P.PDFName.of('Count'), P.PDFNumber.of(countItems(childFirst)));
+          for (let i = 0; i < childRefs.length; i++) {
+            const cd = ctx.lookup(childRefs[i]);
+            if (i > 0) cd.set(P.PDFName.of('Prev'), childRefs[i - 1]);
+            if (i < childRefs.length - 1) cd.set(P.PDFName.of('Next'), childRefs[i + 1]);
+          }
+        }
+        if (parentRef) dict.set(P.PDFName.of('Parent'), parentRef);
+        return ref;
+      }
+
+      // 顶层条目
+      const topRefs = [];
+      const seen = new Set();
+      let cur = srcFirst;
+      while (cur && !seen.has(refKey(cur))) {
+        seen.add(refKey(cur));
+        const built = buildItem(cur, null);
+        if (built) topRefs.push(built);
+        const ti = srcDoc.context.lookup(cur);
+        cur = ti ? ti.get(P.PDFName.of('Next')) : null;
+      }
+      if (!topRefs.length) return false;
+
+      // 目标根
+      const dstRoot = ctx.obj({ Type: P.PDFName.of('Outlines') });
+      const dstRootRef = ctx.register(dstRoot);
+      topRefs.forEach(tr => ctx.lookup(tr).set(P.PDFName.of('Parent'), dstRootRef));
+      dstRoot.set(P.PDFName.of('First'), topRefs[0]);
+      dstRoot.set(P.PDFName.of('Last'), topRefs[topRefs.length - 1]);
+      dstRoot.set(P.PDFName.of('Count'), P.PDFNumber.of(countItems(srcFirst)));
+      for (let i = 0; i < topRefs.length; i++) {
+        const td = ctx.lookup(topRefs[i]);
+        if (i > 0) td.set(P.PDFName.of('Prev'), topRefs[i - 1]);
+        if (i < topRefs.length - 1) td.set(P.PDFName.of('Next'), topRefs[i + 1]);
+      }
+
+      dstDoc.catalog.set(P.PDFName.of('Outlines'), dstRootRef);
+      dstDoc.catalog.set(P.PDFName.of('PageMode'), P.PDFName.of('UseOutlines'));
+      return true;
+    }
+
+    function refKey(r) { return r.objectNumber + ':' + r.generationNumber; }
 
     // 目录条目标签：有话号 → 第X话；否则用文件名（去 .pdf）
     function tocLabel(r) {
@@ -2284,10 +2542,16 @@
       }
       deviceSel.addEventListener('change', () => { applyDevice(); schedulePreview(); updateDbLibBar(); });
 
+      function dbGetThreads() {
+        const e = document.getElementById('dbThreads');
+        const v = e ? parseInt(e.value, 10) : 4;
+        return dbClamp((v && v >= 1) ? v : 4, 1, 16);
+      }
       function refreshEnabled() {
         const on = enableChk.checked;
         body.classList.toggle('disabled', !on);
         body.querySelectorAll('input,select').forEach(el => { if (el !== enableChk) el.disabled = !on; });
+        const t = document.getElementById('dbThreads'); if (t) t.disabled = !on;   // 并行线程数在开关模块下，单独禁用
         statusMsg('');   // 清除「去糊未启用」等过期提示
         updateDbLibBar();   // 同步 PDF 库去糊控制行
       }
@@ -2337,7 +2601,9 @@
         return { params, device: deviceSel.value,
           upscale: document.getElementById('dbUpscale').checked,
           dither: document.getElementById('dbDither').checked,
-          purebw: document.getElementById('dbPurebw').checked };
+          purebw: document.getElementById('dbPurebw').checked,
+          threads: dbGetThreads(),
+          enabled: enableChk.checked };
       }
       function applyPreset(d) {
         if (!d || !d.params) return;
@@ -2346,6 +2612,20 @@
         document.getElementById('dbUpscale').checked = !!d.upscale;
         document.getElementById('dbDither').checked = !!d.dither;
         document.getElementById('dbPurebw').checked = !!d.purebw;
+        const tEl = document.getElementById('dbThreads'); if (tEl) tEl.value = (d.threads != null ? d.threads : 4);
+        if (enableChk) enableChk.checked = (d.enabled !== false);   // 主开关：默认开启
+        refreshEnabled();   // 同步面板禁用态
+        schedulePreview();
+      }
+      function factoryReset() {   // 出厂默认（无保存预设时回退）
+        for (const k in DB_PARAMS) setParam(k, DB_PARAMS[k].def);
+        deviceSel.value = '1236'; applyDevice();
+        document.getElementById('dbUpscale').checked = true;
+        document.getElementById('dbDither').checked = false;   // 抖动计算量大，默认关
+        document.getElementById('dbPurebw').checked = false;
+        const tEl = document.getElementById('dbThreads'); if (tEl) tEl.value = 4;
+        if (enableChk) enableChk.checked = true;
+        refreshEnabled();
         schedulePreview();
       }
       document.getElementById('dbSave').addEventListener('click', () => {
@@ -2353,12 +2633,11 @@
         catch (e) { statusMsg('⚠️ 保存失败（浏览器可能禁用了本地存储）'); }
       });
       document.getElementById('dbReset').addEventListener('click', () => {
-        for (const k in DB_PARAMS) setParam(k, DB_PARAMS[k].def);
-        deviceSel.value = '1236'; applyDevice();
-        document.getElementById('dbUpscale').checked = true;
-        document.getElementById('dbDither').checked = false;   // 抖动计算量大，默认关
-        document.getElementById('dbPurebw').checked = false;
-        schedulePreview(); statusMsg('已恢复默认参数');
+        try {
+          const raw = localStorage.getItem(DB_STORE);
+          if (raw) { applyPreset(JSON.parse(raw)); statusMsg('已恢复为你保存的默认预设'); }
+          else { factoryReset(); statusMsg('尚未保存预设，已恢复出厂默认'); }
+        } catch (e) { factoryReset(); statusMsg('预设读取失败，已恢复出厂默认'); }
       });
       // 供 PDF 库单选时读取该文件并抽图到预览（ZIP / 图片 / Legado 来源统一走此路线）。
       // 保留 pdf-lib 文档引用，配合页码输入框可翻页预览任意页。
