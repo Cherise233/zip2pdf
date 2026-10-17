@@ -37,9 +37,16 @@
     .sel-select { width:100%; max-width:100%; padding:8px 12px; font-size:13px;
       border:1px solid #d1d5db; border-radius:8px; background:#fff; color:#1f2937; height:auto; }
     /* 文件库拖拽排序 */
-    #files .item { cursor:grab; }
+    #files .item { cursor:grab; position:relative; }
     #files .item.dragging { opacity:.4; }
-    #files .item.dragover { box-shadow: inset 0 0 0 2px #4f46e5; }
+    /* 插入指示线：拖到某文件上/下边缘时显示横线，标明松手后的落位（替代整框高亮） */
+    #files .item.drop-top::before,
+    #files .item.drop-bottom::after {
+      content:''; position:absolute; left:0; right:0; height:3px;
+      background:#4f46e5; border-radius:2px; box-shadow:0 0 4px rgba(79,70,229,.55);
+    }
+    #files .item.drop-top::before   { top:-2px; }
+    #files .item.drop-bottom::after { bottom:-2px; }
     .reorder-hint { font-size:12px; color:#9ca3af; margin:6px 0 2px; }
     #chLoadStatus, #fileMergeStatus { margin-top:8px; }
     .btn:disabled { background: #9ca3af; cursor: not-allowed; }
@@ -380,7 +387,7 @@
       <div class="ksec">
         <div class="row" style="margin-top:0">
           <button class="btn gray" id="dbReset" style="flex:1">恢复默认预设</button>
-          <button class="btn gray" id="dbSave" style="flex:1">保存为默认预设</button>
+          <button class="btn gray" id="dbSave" style="flex:1">保存默认预设</button>
         </div>
         <div id="dbStatus" class="kcap" style="color:#4f46e5;text-align:left;margin-top:10px"></div>
       </div>
@@ -1141,12 +1148,21 @@
         });
         div.addEventListener('dragend', () => {
           div.classList.remove('dragging');
-          document.querySelectorAll('#files .item').forEach(x => x.classList.remove('dragover'));
+          document.querySelectorAll('#files .item').forEach(x => x.classList.remove('drop-top','drop-bottom'));
         });
-        div.addEventListener('dragover', (e) => { e.preventDefault(); div.classList.add('dragover'); });
-        div.addEventListener('dragleave', () => div.classList.remove('dragover'));
+        div.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          if (rec.id === dragFileId) return;       // 拖到自己上方不画线
+          const rect = div.getBoundingClientRect();
+          const before = (e.clientY - rect.top) < rect.height / 2;  // 上半=插到前面，下半=插到后面
+          document.querySelectorAll('#files .item').forEach(x => x.classList.remove('drop-top','drop-bottom'));
+          div.classList.add(before ? 'drop-top' : 'drop-bottom');
+          dropTarget = { id: rec.id, before };
+        });
         div.addEventListener('drop', (e) => {
-          e.preventDefault(); div.classList.remove('dragover'); onDropFile(rec.id);
+          e.preventDefault();
+          document.querySelectorAll('#files .item').forEach(x => x.classList.remove('drop-top','drop-bottom'));
+          onDropFile(dropTarget ? dropTarget.id : rec.id, dropTarget ? dropTarget.before : false);
         });
         el.appendChild(div);
       });
@@ -1154,7 +1170,7 @@
     }
 
     // 拖拽落位：把 dragFileId 移到 targetId 前/后并重排 order 持久化
-    async function onDropFile(targetId) {
+    async function onDropFile(targetId, before) {
       if (!dragFileId || dragFileId === targetId) return;
       const list = await dbAllFiles();
       const arr = list.slice().sort((a, b) => (a.order!=null?a.order:0) - (b.order!=null?b.order:0));
@@ -1162,10 +1178,14 @@
       const to = arr.findIndex(r => r.id === targetId);
       if (from < 0 || to < 0) return;
       const [moved] = arr.splice(from, 1);
-      // 统一落在目标之后：from<to 时移除后目标左移 1，插 to；from>to 时目标位置不变，插 to+1
-      arr.splice(from < to ? to : to + 1, 0, moved);
+      // 根据落点（目标前/后）计算插入位置：移除 moved 后目标索引可能左移 1
+      let insertAt;
+      if (before) insertAt = (from < to) ? to - 1 : to;
+      else        insertAt = (from < to) ? to : to + 1;
+      arr.splice(insertAt, 0, moved);
       for (let i = 0; i < arr.length; i++) { arr[i].order = i + 1; await dbPutFile(arr[i]); }
       dragFileId = null;
+      dropTarget = null;
       renderFiles();
     }
 
@@ -1684,6 +1704,7 @@
     let BOOKS = [], CHAPTERS = [], SELECTED = new Set(), IMAGES = [];
     let chapterDisplayOrder = 'asc';   // 章节列表显示顺序：asc 正序 / desc 倒序
     let dragFileId = null;             // 文件库拖拽排序：当前拖动的文件 id
+    let dropTarget = null;             // 文件库拖拽落点：{ id, before }，供 drop 时定位插入位置
     // 取图并发：去糊在同步主线程做重计算，并发过高会占满主线程导致界面无响应
     // （进度停摆、取消点击排队）。默认 3，需要更快可在「并发线数」输入框调高。
     const CONCURRENCY = 3;
