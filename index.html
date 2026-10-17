@@ -123,8 +123,15 @@
     /* ============ 去糊设置（Kindle 漫画去糊）============ */
     .ksec { margin: 12px 0; padding-top: 12px; border-top: 1px solid #e5e7eb; }
     .ksec:first-of-type { border-top: none; padding-top: 0; }
-    .kswitch { display: flex; align-items: center; gap: 10px; font-size: 14px; color: #374151; }
-    .kswitch input { width: 20px; height: 20px; accent-color: #4f46e5; }
+    /* 启停开关：靛蓝滑块样式（保留 #dbEnable 复选框，仅视觉隐藏，JS 引用不变） */
+    .kswitch { position: relative; display: flex; align-items: center; gap: 10px; font-size: 14px; color: #374151; cursor: pointer; }
+    .kswitch input { position: absolute; opacity: 0; width: 0; height: 0; margin: 0; }
+    .kswitch .track { position: relative; flex: none; width: 46px; height: 26px; background: #cbd5e1; border-radius: 999px; transition: background .2s ease; }
+    .kswitch .track::before { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; background: #fff; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform .2s ease; }
+    .kswitch input:checked + .track { background: #4f46e5; }
+    .kswitch input:checked + .track::before { transform: translateX(20px); }
+    .kswitch input:focus-visible + .track { box-shadow: 0 0 0 3px rgba(79,70,229,.35); }
+    .kswitch .txt { font-size: 14px; color: #374151; }
     .krow { margin: 12px 0; }
     .klabel { display: flex; justify-content: space-between; font-size: 13px; color: #374151; margin-bottom: 5px; }
     .klabel b { color: #4f46e5; font-weight: 600; }
@@ -142,6 +149,13 @@
     .kprev canvas { width: 100%; height: auto; border-radius: 10px; border: 1px solid #e5e7eb; display: block; background: #fff; }
     .kprev .ptitle { font-size: 12px; color: #6b7280; text-align: center; margin-top: 6px; }
     .kcap { font-size: 12px; color: #9ca3af; text-align: center; margin-top: 8px; }
+    /* 页码输入框 + 预览按钮：强制 1:1 等宽等高 */
+    .kpagerow { display: flex; align-items: stretch; gap: 8px; margin: 8px 0; }
+    .kpagerow > * { min-width: 0; box-sizing: border-box; }
+    .kpagerow > *:nth-child(1) { flex: 3 1 0; }   /* 页码框 */
+    .kpagerow > *:nth-child(2) { flex: 1 1 0; }   /* 预览按钮 */
+    .kpagerow input[type=number] { text-align: center; border: 1px solid #d1d5db; border-radius: 8px; padding: 9px 6px; font-family: inherit; font-size: 13px; }
+    .kpagerow .btn.small { padding: 9px 12px; border-radius: 8px; }
     /* 库条目缩略图 */
     .item .thumb { width: 54px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid #e5e7eb;
       background: #f3f4f6; flex: none; margin-right: 10px; }
@@ -326,11 +340,11 @@
       <div class="legado-hint" style="margin-top:0">去糊为手动触发：ZIP / 图片上传、Legado 下载都保存原图；到下方「📚 我的 PDF 库」勾选文件，点标题旁的「去糊」按钮才按下方参数处理（重采样到设备宽度 + 锐化 + 对比度等），更适合墨水屏。关闭则不去糊，下方控件变灰。</div>
 
       <div class="ksec">
-        <label class="kswitch"><input type="checkbox" id="dbEnable" checked> 启用去糊</label>
+        <label class="kswitch"><input type="checkbox" id="dbEnable" checked><span class="track"></span><span class="txt">启用去糊</span></label>
       </div>
 
       <div class="ksec" id="kBody">
-        <label>目标硬件（决定重采样宽度）</label>
+        <label style="display:block;margin-bottom:6px">目标硬件（决定重采样宽度）</label>
         <select id="dbDevice" class="sel-select" style="margin-bottom:10px">
           <option value="1072">Kindle Basic 6″ · 1072px</option>
           <option value="1236" selected>Kindle Paperwhite 6.8″ · 1236px</option>
@@ -353,10 +367,9 @@
         <div style="margin:8px 0">
           <button class="btn small gray" id="dbPick" style="width:100%" onclick="document.getElementById('dbImgInput').click()">测试</button>
         </div>
-        <div style="display:flex;gap:8px;margin:8px 0">
-          <input type="number" id="dbPageInput" min="1" step="1" placeholder="共0页" title="输入选中 PDF 的页码"
-            style="flex:1;min-width:0;text-align:center;border:1px solid #d1d5db;border-radius:8px;padding:8px 6px;font-family:inherit;font-size:13px">
-          <button class="btn small" id="dbPreviewBtn" style="flex:1">预览</button>
+        <div class="kpagerow">
+          <input type="number" id="dbPageInput" min="1" step="1" placeholder="共0页" title="输入选中 PDF 的页码">
+          <button class="btn small" id="dbPreviewBtn">刷新预览</button>
         </div>
         <div class="kprev">
           <div class="pcell"><canvas id="dbPrevOrig" title="点击放大查看"></canvas><div class="ptitle">原图</div></div>
@@ -364,11 +377,13 @@
         </div>
       </div>
 
-      <div class="row" style="margin-top:14px">
-        <button class="btn gray" id="dbReset" style="flex:1">恢复默认</button>
-        <button class="btn gray" id="dbSave" style="flex:1">保存为默认</button>
+      <div class="ksec">
+        <div class="row" style="margin-top:0">
+          <button class="btn gray" id="dbReset" style="flex:1">恢复默认预设</button>
+          <button class="btn gray" id="dbSave" style="flex:1">保存为默认预设</button>
+        </div>
+        <div id="dbStatus" class="kcap" style="color:#4f46e5;text-align:left;margin-top:10px"></div>
       </div>
-      <div id="dbStatus" class="kcap" style="color:#4f46e5;text-align:left;margin-top:10px"></div>
     </div>
   </div>
 
@@ -612,9 +627,8 @@
       const grayMix = dbClamp((p.grayscale || 0) / 100, 0, 1);
       let lut = null;
       if (p.gamma && p.gamma !== 1) {
-        const ig = 1 / p.gamma;
         lut = new Uint8ClampedArray(256);
-        for (let v = 0; v < 256; v++) lut[v] = dbClamp(255 * Math.pow(v / 255, ig), 0, 255);
+        for (let v = 0; v < 256; v++) lut[v] = dbClamp(255 * Math.pow(v / 255, p.gamma), 0, 255);
       }
       // 第一遍：亮度 → 灰度混合 → 对比度 → 伽马 LUT
       for (let i = 0; i < d.length; i += 4) {
@@ -2007,6 +2021,11 @@
         if(broken){
           $('#btnReDL').style.display='';
           $('#btnReDL').textContent='🔄 重新下载坏图 ('+broken+')';
+        } else {
+          // 内存优化：本次生成无坏图（不会显示「重下坏图」按钮），取图数据已无用，
+          // 立即释放 IMAGES（每页的全分辨率 canvas + dataUrl，几百页可达数 GB）。
+          // 有坏图时须保留 IMAGES 供 legadoReDownload 重建受影响章节，故仅无坏图时清。
+          IMAGES = [];
         }
       }catch(e){
         if(e && e.message==='__ABORT__'){
@@ -2056,6 +2075,8 @@
         }else{
           setLegadoStatus('🎉 全部坏图已补回！已更新文件库记录。');
           $('#btnReDL').style.display='none';
+          // 内存优化：坏图已全部补回，受影响章节已重建写库，取图数据不再需要，立即释放
+          IMAGES = [];
         }
       }catch(e){ setLegadoStatus('重下出错：'+e.message); }
       finally{ $('#btnReDL').disabled=false; $('#btnBuild').disabled=false; }
@@ -2228,6 +2249,7 @@
         const on = enableChk.checked;
         body.classList.toggle('disabled', !on);
         body.querySelectorAll('input,select').forEach(el => { if (el !== enableChk) el.disabled = !on; });
+        statusMsg('');   // 清除「去糊未启用」等过期提示
         updateDbLibBar();   // 同步 PDF 库去糊控制行
       }
       enableChk.addEventListener('change', refreshEnabled);
@@ -2246,11 +2268,15 @@
         g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
         g.drawImage(srcCanvas, 0, 0, cv.width, cv.height);
       }
+      // 最近一次渲染的全尺寸 canvas（原图 / 去糊后），供点击放大时取高清图
+      // （预览画布被缩到 ~220px，直接 toDataURL 会得到模糊小图）
+      let dbLastOrigC = null, dbLastProcC = null;
       function renderPreview() {
         if (!srcImg) return;
         const p = dbGetParams() || { width: 0, upscale: true };
         const origC = (p.width > 0) ? dbResizeToWidth(srcImg, p.width, p.upscale) : srcImg;
         const procC = dbApply(srcImg);
+        dbLastOrigC = origC; dbLastProcC = procC;
         drawPrev(prevOrig, origC);
         drawPrev(prevProc, procC);
       }
@@ -2365,12 +2391,14 @@
       // 预览图点击放大（左右任一图均可）
       const dbLightbox = document.getElementById('dbLightbox');
       const dbLightboxImg = document.getElementById('dbLightboxImg');
-      [document.getElementById('dbPrevOrig'), document.getElementById('dbPrevProc')].forEach(cv => {
+      [document.getElementById('dbPrevOrig'), document.getElementById('dbPrevProc')].forEach((cv, idx) => {
         if (!cv) return;
         cv.style.cursor = 'zoom-in';
         cv.addEventListener('click', () => {
-          if (!cv.width || !cv.height || !dbLightbox) return;
-          dbLightboxImg.src = cv.toDataURL('image/png');
+          // 优先取「最近一次渲染的全尺寸 canvas」，避免把 220px 缩略图放大成糊图
+          const hi = (idx === 0 ? dbLastOrigC : dbLastProcC) || cv;
+          if (!hi || !hi.width || !hi.height || !dbLightbox) return;
+          dbLightboxImg.src = hi.toDataURL('image/png');
           dbLightbox.style.display = 'flex';
         });
       });
