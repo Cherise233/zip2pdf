@@ -298,7 +298,10 @@
     <h2>我的 PDF 库</h2>
     <div class="dbrow">
       <span id="dbLibState">✅ 去糊已启用</span>
-      <button class="btn small" id="dbLibBtn">去糊</button>
+      <span style="display:flex;gap:8px;flex:none">
+        <button class="btn small gray" id="dbViewBtn" onclick="switchTab('deblur')">查看</button>
+        <button class="btn small" id="dbLibBtn">去糊</button>
+      </span>
     </div>
     <div id="library"></div>
     <div class="bulk" id="pdfBulk">
@@ -347,10 +350,13 @@
       <div class="ksec">
         <label>预览</label>
         <input type="file" id="dbImgInput" accept="image/*">
+        <div style="margin:8px 0">
+          <button class="btn small gray" id="dbPick" style="width:100%" onclick="document.getElementById('dbImgInput').click()">测试</button>
+        </div>
         <div style="display:flex;gap:8px;margin:8px 0">
-          <button class="btn small gray" id="dbPick" style="flex:1" onclick="document.getElementById('dbImgInput').click()">测试</button>
-          <input type="number" id="dbPageInput" min="1" step="1" placeholder="共0页" title="输入选中 PDF 的页码，查看该页预览"
-            style="flex:0 0 96px;text-align:center;border:1px solid #d1d5db;border-radius:8px;padding:8px 6px;font-family:inherit;font-size:13px">
+          <input type="number" id="dbPageInput" min="1" step="1" placeholder="共0页" title="输入选中 PDF 的页码"
+            style="flex:1;min-width:0;text-align:center;border:1px solid #d1d5db;border-radius:8px;padding:8px 6px;font-family:inherit;font-size:13px">
+          <button class="btn small" id="dbPreviewBtn" style="flex:1">预览</button>
         </div>
         <div class="kprev">
           <div class="pcell"><canvas id="dbPrevOrig" title="点击放大查看"></canvas><div class="ptitle">原图</div></div>
@@ -364,6 +370,12 @@
       </div>
       <div id="dbStatus" class="kcap" style="color:#4f46e5;text-align:left;margin-top:10px"></div>
     </div>
+  </div>
+
+  <!-- 去糊预览大图查看（点预览图放大）。注意：必须在下方脚本标签之前解析，
+       否则脚本执行时 getElementById 取不到，点击绑定会拿到 null 而失效 -->
+  <div id="dbLightbox" class="mask" style="display:none" title="点击任意处关闭">
+    <img id="dbLightboxImg" alt="预览大图" style="max-width:92vw;max-height:92vh;border-radius:8px;background:#fff;cursor:zoom-out;box-shadow:0 8px 40px rgba(0,0,0,.35)">
   </div>
 
   <script src="vendor/jszip.min.js"></script>
@@ -2334,6 +2346,22 @@
         updateDbPageInput(pi);
         await dbShowPdfPage(pi);
       });
+      // 「预览」按钮：按当前页码重新提取渲染（PDF 上下文）/ 刷新当前图的左右对比
+      const dbPreviewBtn = document.getElementById('dbPreviewBtn');
+      if (dbPreviewBtn) dbPreviewBtn.addEventListener('click', async () => {
+        if (dbCurPdfDoc) {
+          let pi = parseInt(dbPageInput.value, 10);
+          if (isNaN(pi)) pi = 1;
+          pi = Math.max(1, Math.min(dbCurPageCount, pi));
+          updateDbPageInput(pi);
+          await dbShowPdfPage(pi);
+        } else if (srcImg) {
+          renderPreview();
+          statusMsg('已刷新预览');
+        } else {
+          statusMsg('请先在 PDF 库单选一个文件，或点「测试」选一张图');
+        }
+      });
       // 预览图点击放大（左右任一图均可）
       const dbLightbox = document.getElementById('dbLightbox');
       const dbLightboxImg = document.getElementById('dbLightboxImg');
@@ -2413,10 +2441,5 @@
       }
     })();
   </script>
-
-  <!-- 去糊预览大图查看（点预览图放大） -->
-  <div id="dbLightbox" class="mask" style="display:none" title="点击任意处关闭">
-    <img id="dbLightboxImg" alt="预览大图" style="max-width:92vw;max-height:92vh;border-radius:8px;background:#fff;cursor:zoom-out;box-shadow:0 8px 40px rgba(0,0,0,.35)">
-  </div>
 </body>
 </html>
