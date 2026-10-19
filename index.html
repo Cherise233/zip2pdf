@@ -381,7 +381,7 @@
         <label>预览</label>
         <input type="file" id="dbImgInput" accept="image/*">
         <div style="margin:8px 0">
-          <button class="btn small gray" id="dbPick" style="width:100%" onclick="document.getElementById('dbImgInput').click()">测试</button>
+          <button class="btn small gray" id="dbPick" style="width:100%">测试</button>
         </div>
         <div class="kpagerow">
           <input type="number" id="dbPageInput" min="1" step="1" placeholder="共0页" title="输入选中 PDF 的页码">
@@ -2490,10 +2490,53 @@
         updateDbPageInput(1);
         const url = URL.createObjectURL(f);
         const im = new Image();
-        im.onload = () => { srcImg = im; renderPreview(); URL.revokeObjectURL(url); statusMsg('已加载本地图片（原图）'); };
+        im.onload = () => { srcImg = im; renderPreview(); URL.revokeObjectURL(url); statusMsg('已加载本地图片（原图）'); setPickMode(true); };
         im.onerror = () => { URL.revokeObjectURL(url); };
         im.src = url; e.target.value = '';
       });
+
+      // 「测试 / 下载测试 PDF」双态按钮：
+      //   初始       → 「测试」，点击调起选图
+      //   上传图片后 → 「下载测试 PDF」，导出两页 PDF（第 1 页原图、第 2 页去糊后）供传到设备实测
+      //   下载完成   → 复原为「测试」，可继续上传新的测试图
+      const pickBtn = document.getElementById('dbPick');
+      function openPicker() { if (imgInput) imgInput.click(); }
+      function setPickMode(toDownload) {
+        if (!pickBtn) return;
+        pickBtn.textContent = toDownload ? '下载测试 PDF' : '测试';
+        pickBtn.classList.toggle('gray', !toDownload);
+        pickBtn.onclick = toDownload ? downloadTestPdf : openPicker;
+      }
+      async function downloadTestPdf() {
+        const origC = dbLastOrigC, procC = dbLastProcC;
+        if (!origC || !procC) { statusMsg('请先上传一张测试图片'); return; }
+        if (!pickBtn) return;
+        pickBtn.disabled = true; pickBtn.textContent = '生成中…';
+        try {
+          await ensureLibs();
+          if (typeof PDFLib === 'undefined') { statusMsg('⚠️ pdf-lib 未加载，无法生成测试 PDF'); return; }
+          const doc = await PDFLib.PDFDocument.create();
+          // 两页：第 1 页原图、第 2 页去糊后，传到设备上翻页即可对比
+          for (const cv of [origC, procC]) {
+            const img = await doc.embedJpg(cv.toDataURL('image/jpeg', 0.92));
+            const page = doc.addPage([cv.width, cv.height]);
+            page.drawImage(img, { x: 0, y: 0, width: cv.width, height: cv.height });
+          }
+          const blob = new Blob([await doc.save()], { type: 'application/pdf' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = '去糊测试.pdf';
+          document.body.appendChild(a); a.click();
+          setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
+          statusMsg('✅ 测试 PDF 已下载（2 页：原图 + 去糊后），可重新上传新的测试图片');
+        } catch (e) {
+          statusMsg('⚠️ 生成测试 PDF 失败：' + (e && e.message ? e.message : e));
+        } finally {
+          pickBtn.disabled = false;
+          setPickMode(false);   // 复原为「测试」，允许上传新图
+        }
+      }
+      setPickMode(false);   // 初始态
 
       // 保存 / 恢复默认
       function collectPreset() {
