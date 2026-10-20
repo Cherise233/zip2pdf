@@ -18,7 +18,7 @@
     p.tip { text-align: center; color: #6b7280; font-size: 13px; margin-bottom: 20px; }
     .card { background: #fff; border-radius: 16px; padding: 24px;
       max-width: 480px; margin: 0 auto 20px; box-shadow: 0 4px 12px rgba(0,0,0,.08); }
-    #fileInput, #imgInput, #dbImgInput { display: none; }
+    #fileInput, #imgInput, #dbImgInput, #otherInput { display: none; }
     .btn { display: inline-block; background: #4f46e5; color: #fff; border: none;
       border-radius: 12px; padding: 12px 18px; font-size: 15px; cursor: pointer;
       white-space: nowrap; }
@@ -200,11 +200,15 @@
 
   <div id="tabMain">
     <div class="card">
-    <input type="file" id="fileInput" accept=".zip,application/zip,application/x-zip-compressed">
+    <input type="file" id="fileInput" accept=".zip,.cbz,application/zip,application/x-zip-compressed">
     <input type="file" id="imgInput" accept="image/*" multiple>
-    <div class="row" style="margin-bottom:14px">
+    <input type="file" id="otherInput" accept=".pdf,.epub,application/pdf,application/epub+zip" multiple>
+    <div class="row" style="margin-bottom:8px">
       <button class="btn main-tab" onclick="document.getElementById('fileInput').click()">📦 ZIP 文件</button>
       <button class="btn main-tab" onclick="document.getElementById('imgInput').click()">🖼️ 图片文件</button>
+    </div>
+    <div class="row" style="margin-bottom:14px">
+      <button class="btn main-tab" onclick="document.getElementById('otherInput').click()">📄 其他文件</button>
       <button class="btn main-tab" id="btnLegadoToggle">📚 Legado</button>
     </div>
     <div class="opt">
@@ -1109,11 +1113,176 @@
       }
     });
 
+    // ================= 其他文件（.pdf / .epub 等）=================
+    // .pdf  → 本身已是 PDF，直接入库（补一个首图缩略图即可）
+    // .epub → 本质是一个 zip：container.xml → OPF → manifest + spine，按 spine 顺序取图后合成 1 个 PDF
+    // .mobi/.azw3/.azw → 二进制 PDB 容器（且常带 DRM），前端无法可靠解析 → 明确提示
+    function zipJoin(base, rel) {
+      let p = String(rel || '').split('#')[0].split('?')[0].trim();
+      try { p = decodeURIComponent(p); } catch (e) {}
+      if (!p) return '';
+      if (/^[a-z]+:\/\//i.test(p)) return '';           // 外链图片/绝对 URL：跳过
+      if (p.charAt(0) === '/') return p.slice(1);
+      const stack = String(base || '').split('/').filter(Boolean);
+      stack.pop();                                        // 去掉文件名，保留所在目录
+      for (const seg of p.split('/')) {
+        if (!seg || seg === '.') continue;
+        if (seg === '..') stack.pop(); else stack.push(seg);
+      }
+      return stack.join('/');
+    }
+    // 从一段标签里取属性值（EPUB 的 OPF/container.xml 都是 XML，直接正则够用）
+    function attrOf(tag, name) {
+      const m = String(tag).match(new RegExp('\\b' + name + '\\s*=\\s*"([^"]*)"', 'i'));
+      return m ? m[1] : '';
+    }
+    // 从 EPUB 中按「阅读顺序」取出图片条目（JSZip file 对象，带 .async('blob')）
+    async function epubImageEntries(file) {
+      const zip = await JSZip.loadAsync(file);
+      const cfile = zip.file('META-INF/container.xml');
+      if (!cfile) throw new Error('不是有效的 EPUB（缺少 META-INF/container.xml）');
+      const cxml = await cfile.async('string');
+      const rf = cxml.match(/<rootfile\b[^>]*full-path\s*=\s*"([^"]+)"/i);
+      if (!rf) throw new Error('EPUB 解析失败：找不到 rootfile');
+      const opfPath = rf[1];
+      const opffile = zip.file(opfPath);
+      if (!opffile) throw new Error('EPUB 解析失败：找不到 OPF 文件');
+      const opf = await opffile.async('string');
+      const base = opfPath;
+      // manifest 必须保留**全量**条目（不限 media-type）：
+      // spine 的 idref 指向的是「章节文档」（application/xhtml+xml），不是图片，
+      // 之前只留图片导致 man.get(sid) 永远查不到，主路径一次都没生效过。
+      const man = new Map();
+      for (const tag of (opf.match(/<item\b[^>]*>/gi) || [])) {
+        const id = attrOf(tag, 'id');
+        if (id) man.set(id, { href: attrOf(tag, 'href'), mt: attrOf(tag, 'media-type') });
+      }
+      const used = new Set();
+      const out = [];
+      const push = (p) => {
+        if (!p || used.has(p)) return;
+        const f = zip.file(p);
+        if (f && !f.dir) { used.add(p); out.push(f); }
+      };
+      // 主路径：按 spine 的章节顺序，逐个章节文档抽取其中引用的图片
+      // （封面 / 导航页不在 spine 里，会被自然排除，不会混进 PDF）
+      for (const tag of (opf.match(/<itemref\b[^>]*>/gi) || [])) {
+        const sid = attrOf(tag, 'idref');
+        const it = sid && man.get(sid);
+        if (!it || !it.href) continue;
+        const docPath = zipJoin(base, it.href);
+        const df = docPath && zip.file(docPath);
+        if (!df) continue;
+        // 极少数 epub 的 spine 直接指向图片
+        if (/^image\//i.test(it.mt || '')) { push(docPath); continue; }
+        let txt;
+        try { txt = await df.async('string'); } catch (e) { continue; }
+        for (const m of txt.matchAll(/<(?:img|image)\b[^>]*>/gi)) {
+          const r = attrOf(m[0], 'src') || attrOf(m[0], 'href') || attrOf(m[0], 'xlink:href');
+          if (r) push(zipJoin(docPath, r));
+        }
+      }
+      // 兜底：spine 抽不到时，按压缩包内文件名自然序
+      if (!out.length) {
+        Object.values(zip.files)
+          .filter(f => !f.dir && IMAGE_RE.test(f.name))
+          .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+          .forEach(f => out.push(f));
+      }
+      return out;
+    }
+    // 从 PDF 文件生成一条库记录（PDF 已是 PDF，只补缩略图，不做转换）
+    async function importPdfFile(file) {
+      await ensureLibs();
+      const buf = await file.arrayBuffer();
+      const doc = await PDFLib.PDFDocument.load(buf);
+      const pages = doc.getPages();
+      if (!pages.length) throw new Error('这个 PDF 没有页面');
+      let thumb = null;
+      try {
+        const jpeg = await extractJpegFromPage(doc, pages[0]);
+        if (jpeg) {
+          const bmp = await createImageBitmap(jpeg);
+          const c = document.createElement('canvas');
+          c.width = bmp.width; c.height = bmp.height;
+          c.getContext('2d').drawImage(bmp, 0, 0);
+          if (bmp.close) bmp.close();
+          thumb = dbMakeThumb(c);
+        }
+      } catch (e) {}
+      const blob = new Blob([buf], { type: 'application/pdf' });
+      const rec = { id: 'pdf-' + Date.now(), name: file.name, size: blob.size,
+        createdAt: new Date().toLocaleString('zh-CN'), sent: false, blob,
+        kind: 'other', deblurred: false, pageCount: pages.length };
+      if (thumb) rec.thumb = thumb;
+      await dbPut(rec);
+      return rec;
+    }
+    // 解析 EPUB：读 container.xml → OPF → manifest + spine，按 spine 取图片
+    async function importEpubFile(file) {
+      await ensureLibs();
+      const entries = await epubImageEntries(file);
+      if (!entries.length) throw new Error('这个 EPUB 里没有找到图片');
+        const { blob, skipped } = await buildPDF(entries, (i) => {
+          setProgress(15 + (i + 1) / entries.length * 85, '转换图片 ' + (i + 1) + '/' + entries.length);
+        });
+        const baseName = file.name.replace(/\.epub$/i, '');
+      const rec = { id: 'epub-' + Date.now(), name: `${baseName}.pdf`, size: blob.size,
+        createdAt: new Date().toLocaleString('zh-CN'), sent: false, blob,
+        kind: 'other', deblurred: false, pageCount: entries.length - skipped.length };
+      await dbPut(rec);
+      return { rec, skipped };
+    }
+    // 统一入口：按扩展名分流 PDF（直接入库）/ EPUB（解压取图后合成）
+    async function importOtherFile(file) {
+      const ext = (file.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
+      if (ext === '.pdf') {
+        const rec = await importPdfFile(file);
+        await addUpload({ name: file.name, size: file.size, kind: 'other',
+          detail: 'PDF', result: '已存入 PDF 库', ok: true });
+        return { rec, skipped: [] };
+      }
+      if (ext === '.epub') {
+        const { rec, skipped } = await importEpubFile(file);
+        await addUpload({ name: file.name, size: file.size, kind: 'other',
+          detail: 'EPUB', result: '1 个 PDF · ' + (rec.pageCount) + ' 页', ok: true,
+          note: skippedNote(skipped) });
+        return { rec, skipped };
+      }
+      throw new Error('暂不支持 ' + (ext || '未知') + ' 格式（MOBI/AZW3 为加密二进制容器），请先用 Calibre 转为 EPUB 或 PDF');
+    }
+
     function reportLibMissing(missing) {
       document.getElementById('status').innerHTML =
         '<span style="color:#dc2626">⚠️ 依赖库加载失败：' + missing.join('、') +
         '<br>请确认 vendor/ 目录已随网页一起上传（GitHub Pages 需包含该文件夹）</span>';
     }
+
+    // 「其他文件」按钮：按扩展名分流 PDF（直接入库）/ EPUB（解压取图后合成）
+    const otherInputEl = document.getElementById('otherInput');
+    if (otherInputEl) otherInputEl.addEventListener('change', async (e) => {
+      const files = Array.from(e.target.files || []);
+      e.target.value = '';
+      if (!files.length) return;
+      const status = document.getElementById('status');
+      for (const file of files) {
+        setProgress(0, '读取「' + file.name + '」…');
+        try {
+          await ensureLibs();
+          const missing = checkLibs();
+          if (missing.length) { reportLibMissing(missing); return; }
+          const { rec, skipped } = await importOtherFile(file);
+          setProgress(100, '完成 ✔');
+          // 提示用「导入的源文件」名（.epub/.pdf）；库里的条目名则是输出 PDF 名
+          status.textContent = `已导入「${file.name}」` +
+            (rec.pageCount ? `（${rec.pageCount} 页）` : '') + skippedNote(skipped);
+          renderLibrary();
+        } catch (err) {
+          status.textContent = `「${file.name}」导入失败：` + (err && err.message ? err.message : err);
+        }
+      }
+      hideProgress();
+    });
 
     // ================= 上传记录 =================
     function escapeHtml(s) {
