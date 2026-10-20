@@ -2855,10 +2855,9 @@
           await ensureLibs();
           if (typeof PDFLib === 'undefined') { statusMsg('⚠️ pdf-lib 未加载，无法生成测试 PDF'); return; }
           const doc = await PDFLib.PDFDocument.create();
-          // 两页：第 1 页原图、第 2 页去糊后，传到设备上翻页即可对比
-          // 裁边 / 拉伸对两页同样生效，保证尺寸一致、对比公平
-          for (const src of [origC, procC]) {
-            const cv = dbCropAndFit(src);
+          // 两页：第 1 页原图（不裁边、不拉伸，保留原始比例）、第 2 页去糊后
+          // （dbLastProcC 已含裁边 + 拉伸），传到设备上翻页即可对比
+          for (const cv of [origC, procC]) {
             const img = await doc.embedJpg(cv.toDataURL('image/jpeg', 0.92));
             const page = doc.addPage([cv.width, cv.height]);
             page.drawImage(img, { x: 0, y: 0, width: cv.width, height: cv.height });
