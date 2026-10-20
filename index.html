@@ -388,11 +388,13 @@
             <span style="font-size:13px;color:#374151;white-space:nowrap">以第</span>
             <input type="number" id="dbCropPage" min="1" step="1" value="1">
             <span style="font-size:13px;color:#374151;white-space:nowrap">页识别</span>
-            <button class="btn small" id="dbCropDetect" style="margin-left:auto">识别本页</button>
-            <button class="btn small" id="dbCropManual">手动裁边</button>
+          </div>
+          <div class="kprow" style="margin:0 0 10px;gap:8px">
+            <button class="btn small gray" id="dbCropClear" style="flex:1 1 0;min-width:0">归零</button>
+            <button class="btn small" id="dbCropDetect" style="flex:1 1 0;min-width:0">识别本页</button>
+            <button class="btn small" id="dbCropManual" style="flex:1 1 0;min-width:0">手动裁边</button>
           </div>
           <div id="kCropParams"></div>
-          <button class="btn small gray" id="dbCropClear" style="width:100%;margin-top:10px">归零</button>
         </div>
 
         <label style="display:block;margin:14px 0 6px">开关</label>
@@ -2598,7 +2600,7 @@
         rng.addEventListener('input', () => setFromRange(rng.value));
         setFromRange(p.def);
       }
-      updateProcTitle();   // 初始标题：去糊后（宽×高 · 实时）
+      updateProcTitle();   // 初始标题：去糊后（宽×高）
 
       function syncDeviceOnManualWidth(val) {
         const w = parseInt(deviceSel.value, 10);
@@ -2632,11 +2634,11 @@
         const el = document.getElementById('dbPTitleProc');
         if (!el) return;
         const sel = document.getElementById('dbDevice');
-        if (sel && sel.value === '-1') { el.textContent = '去糊后（原图尺寸）· 实时'; return; }
+        if (sel && sel.value === '-1') { el.textContent = '去糊后（原图尺寸）'; return; }
         const cw = controls.width, ch = controls.height;
         const w = Math.round(cw ? parseFloat(cw.rng.value) : 0);
         const h = Math.round(ch ? parseFloat(ch.rng.value) : 0);
-        el.textContent = (w > 0 && h > 0) ? ('去糊后（' + w + '×' + h + '）· 实时') : '去糊后 · 实时';
+        el.textContent = (w > 0 && h > 0) ? ('去糊后（' + w + '×' + h + '）') : '去糊后';
       }
       deviceSel.addEventListener('change', () => { applyDevice(); schedulePreview(); updateDbLibBar(); });
       // 拉伸开关：切换后立即重渲染预览（其它开关沿用原有按需刷新）
@@ -2751,7 +2753,9 @@
       // 「手动裁边」：打开去糊后的放大图（与点击去糊缩略图效果一致），
       // 方便放大对照着调四边数值。勾选「自动识别」时置灰。
       const cropManualBtn = document.getElementById('dbCropManual');
+      // 「识别本页」仅在自动模式下可用；「手动裁边」仅在手动模式下可用（两者互斥）
       function syncCropModeUI() {
+        if (cropDetectBtn) cropDetectBtn.disabled = !DB_CROP.enabled || !DB_CROP.auto;
         if (cropManualBtn) cropManualBtn.disabled = !DB_CROP.enabled || DB_CROP.auto;
       }
       if (cropManualBtn) cropManualBtn.addEventListener('click', () => { openCropEditor(); });
