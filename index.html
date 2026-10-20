@@ -22,7 +22,8 @@
     .btn { display: inline-block; background: #4f46e5; color: #fff; border: none;
       border-radius: 12px; padding: 12px 18px; font-size: 15px; cursor: pointer;
       white-space: nowrap; }
-    /* 顶部三个主按钮（ZIP/图片/Legado）：被 flex 均分宽度，缩小字号与横向内边距防止文字溢出按钮 */
+    /* 顶部主按钮（ZIP/图片/其他文件/Legado）：被 flex 均分宽度，
+       缩小字号与横向内边距防止文字溢出按钮 */
     .row > .btn.main-tab { font-size: 13px; padding: 12px 4px; }
     @media (max-width: 380px) { .row > .btn.main-tab { font-size: 12px; } }
     /* 表单控件继承正文字体（标题字体），并与按钮同高、不超出模块 */
@@ -1316,7 +1317,8 @@
           const div = document.createElement('div');
           const on = selUploads.has(rec.id);
           div.className = 'item' + (on ? ' sel' : '');
-          const icon = rec.kind === 'zip' ? '📦' : '🖼️';
+          // 图标与主页上传按钮保持一致：📦 ZIP / 📄 其他文件 / 🖼️ 图片
+          const icon = rec.kind === 'zip' ? '📦' : (rec.kind === 'other' ? '📄' : '🖼️');
           const badge = rec.ok
             ? '<span style="color:#059669">✅ ' + escapeHtml(rec.result || '成功') + '</span>'
             : '<span style="color:#dc2626">❌ ' + escapeHtml(rec.note || '失败') + '</span>';
