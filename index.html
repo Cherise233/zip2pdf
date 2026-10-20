@@ -55,6 +55,12 @@
     #legadoPanel .btn.small { padding: 9px 12px; }
     .btn.danger { background: #dc2626; }
     .btn.gray { background: #6b7280; }
+    .btn:disabled { background: #d1d5db; cursor: not-allowed; }
+    /* 裁边编辑态（仅「手动裁边」进入）：把放大图压矮一点，给底部 [取消][确定] 留出独立空间，
+       避免按钮压住裁剪框下边的调整点。点缩略图的普通放大不带这个 class，尺寸保持原样。
+       注意必须用 class 切换，不能改内联 style 再置空（那样会删掉 img 自带的 max-height:92vh）。 */
+    /* img 上有内联 max-height:92vh，内联优先级高于样式表，必须 !important 才能盖过它 */
+    #dbLightbox.cropping #dbLightboxImg { max-height: calc(92vh - 92px) !important; }
     #status { margin-top: 14px; color: #374151; font-size: 14px; min-height: 20px; }
     .bar-wrap { margin-top: 14px; display: none; }
     .bar { height: 10px; background: #e5e7eb; border-radius: 999px; overflow: hidden; }
@@ -163,7 +169,10 @@
     .kprev { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
     .kprev .pcell { display: flex; flex-direction: column; min-width: 0; }
     .kprev canvas { width: 100%; height: auto; border-radius: 10px; border: 1px solid #e5e7eb; display: block; background: #fff; }
-    .kprev .ptitle { font-size: 12px; color: #6b7280; text-align: center; margin-top: 6px; }
+    /* 两格高度由 grid 拉齐（两图画布比例不同），标题用 margin-top:auto 顶到各自格子底部，
+       保证「原图」与「去糊后（…）」永远在同一水平线上；nowrap 防止长标题折行错位 */
+    .kprev .ptitle { font-size: 12px; color: #6b7280; text-align: center;
+      margin-top: auto; padding-top: 6px; white-space: nowrap; }
     .kcap { font-size: 12px; color: #9ca3af; text-align: center; margin-top: 8px; }
     /* 页码输入框 + 预览按钮：强制 1:1 等宽等高 */
     .kpagerow { display: flex; align-items: stretch; gap: 8px; margin: 8px 0; }
@@ -362,19 +371,35 @@
       <div class="ksec" id="kBody">
         <label style="display:block;margin-bottom:6px">目标硬件（决定重采样宽度）</label>
         <select id="dbDevice" class="sel-select" style="margin-bottom:10px">
-          <option value="1072">Kindle Basic 6″ · 1072px</option>
-          <option value="1236" selected>Kindle Paperwhite 6.8″ · 1236px</option>
-          <option value="1264">Kindle Oasis 7″ · 1264px</option>
-          <option value="1860">Kindle Scribe 10.2″ · 1860px</option>
+          <option value="1072" data-h="1448">Kindle Basic 6″ · 1072×1448</option>
+          <option value="1236" data-h="1648" selected>Kindle Paperwhite 6.8″ · 1236×1648</option>
+          <option value="1264" data-h="1680">Kindle Oasis 7″ · 1264×1680</option>
+          <option value="1860" data-h="2480">Kindle Scribe 10.2″ · 1860×2480</option>
           <option value="0">自定义宽度（用下方滑块）</option>
           <option value="-1">保留原图尺寸（不缩放）</option>
         </select>
         <div id="kParams"></div>
 
+        <label class="kswitch" style="margin:14px 0 0"><input type="checkbox" id="dbCropEnable"><span class="track"></span><span class="txt">裁边</span></label>
+        <div id="kCropBody" style="display:none">
+          <div class="ktip" style="margin:8px 0 10px">裁掉四周留白（扫描白边、页眉页脚）。预览里<b style="color:#4f46e5">靛蓝色</b>区域就是将被裁掉的部分。</div>
+          <label class="kcheck"><input type="checkbox" id="dbCropAuto" checked>自动识别（换新图时按识别源页自动测一次，结果套用全书）</label>
+          <div class="kprow" style="margin:0 0 10px;gap:8px">
+            <span style="font-size:13px;color:#374151;white-space:nowrap">以第</span>
+            <input type="number" id="dbCropPage" min="1" step="1" value="1">
+            <span style="font-size:13px;color:#374151;white-space:nowrap">页识别</span>
+            <button class="btn small" id="dbCropDetect" style="margin-left:auto">识别本页</button>
+            <button class="btn small" id="dbCropManual">手动裁边</button>
+          </div>
+          <div id="kCropParams"></div>
+          <button class="btn small gray" id="dbCropClear" style="width:100%;margin-top:10px">归零</button>
+        </div>
+
         <label style="display:block;margin:14px 0 6px">开关</label>
         <label class="kcheck"><input type="checkbox" id="dbUpscale" checked>允许放大（原图小于目标宽度时放大，让小字更清晰）</label>
         <label class="kcheck"><input type="checkbox" id="dbDither" checked>灰度抖动（量化灰阶时减少断层，黑白屏更平滑；计算量大，卡顿时可关掉）</label>
         <label class="kcheck"><input type="checkbox" id="dbPurebw">纯黑白 1-bit（文字/线稿最锐，但丢失灰阶）</label>
+        <label class="kcheck"><input type="checkbox" id="dbStretch">拉伸至设备宽高（非等比铺满，消除 Kindle「整页」白边）</label>
       </div>
 
       <div class="ksec">
@@ -389,7 +414,7 @@
         </div>
         <div class="kprev">
           <div class="pcell"><canvas id="dbPrevOrig" title="点击放大查看"></canvas><div class="ptitle">原图</div></div>
-          <div class="pcell"><canvas id="dbPrevProc" title="点击放大查看"></canvas><div class="ptitle">去糊后（实时）</div></div>
+          <div class="pcell"><canvas id="dbPrevProc" title="点击放大查看"></canvas><div class="ptitle" id="dbPTitleProc">去糊后（1236×1648）</div></div>
         </div>
       </div>
 
@@ -406,7 +431,15 @@
   <!-- 去糊预览大图查看（点预览图放大）。注意：必须在下方脚本标签之前解析，
        否则脚本执行时 getElementById 取不到，点击绑定会拿到 null 而失效 -->
   <div id="dbLightbox" class="mask" style="display:none" title="点击任意处关闭">
-    <img id="dbLightboxImg" alt="预览大图" style="max-width:92vw;max-height:92vh;border-radius:8px;background:#fff;cursor:zoom-out;box-shadow:0 8px 40px rgba(0,0,0,.35)">
+    <div id="dbLbStage" style="position:relative;display:inline-block;line-height:0;">
+      <img id="dbLightboxImg" alt="预览大图" style="max-width:92vw;max-height:92vh;border-radius:8px;background:#fff;cursor:zoom-out;box-shadow:0 8px 40px rgba(0,0,0,.35);display:block">
+      <!-- 手动裁边：叠在放大图上的裁剪框画布（四边/四角可拖） -->
+      <canvas id="dbCropCanvas" style="display:none;position:absolute;left:0;top:0;touch-action:none;cursor:crosshair"></canvas>
+    </div>
+    <div id="dbCropBar" style="display:none;position:absolute;left:0;right:0;bottom:24px;justify-content:center;gap:10px;">
+      <button class="btn small gray" id="dbCropCancel">取消</button>
+      <button class="btn small" id="dbCropOk">确定</button>
+    </div>
   </div>
 
   <script src="vendor/jszip.min.js"></script>
@@ -694,6 +727,7 @@
       const chk = id => { const e = document.getElementById(id); return !!(e && e.checked); };
       return {
         width: num('dbRng_width'),
+        height: num('dbRng_height'),
         contrast: num('dbRng_contrast'),
         gamma: num('dbRng_gamma'),
         sharpen: num('dbRng_sharpen'),
@@ -712,6 +746,131 @@
       if (!p) return canvas;
       if (p.width > 0) canvas = dbResizeToWidth(canvas, p.width, p.upscale);
       return dbEnhance(canvas, p);
+    }
+
+    // ---- 设备宽高 / 拉伸铺满 / 设备屏模拟（消除 Kindle「整页」白边）----
+    // 设备目标尺寸统一读取「目标宽度 / 目标高度」两个参数；
+    // #dbDevice 只负责在切换机型时把该机型的宽高填进这两个参数（屏高存在 option 的 data-h 上）。
+    function dbGetDeviceSize() {
+      const p = dbGetParams();
+      if (!p) return { w: 0, h: 0 };                  // 去糊未启用
+      const sel = document.getElementById('dbDevice');
+      if (sel && sel.value === '-1') return { w: 0, h: 0 };   // 保留原图尺寸：不参与
+      return { w: Math.round(p.width), h: Math.round(p.height) };
+    }
+
+    // ---- 裁边状态：去糊面板 UI 写入，流水线读取 ----
+    const DB_CROP = { enabled: false, auto: true, page: 1, top: 0, bottom: 0, left: 0, right: 0 };
+    let DB_LAST_BASE = { w: 0, h: 0 };    // 最近一次「重采样+去糊后、未裁边」的画布尺寸
+    let DB_LAST_BASE_C = null;            // 同上，画布本身（供「识别本页」复用）
+
+    // 取裁边值（按画布尺寸 clamp，四边合计至少留 20px）；未启用或全为 0 → null
+    function dbGetCrop(canvasW, canvasH) {
+      if (!DB_CROP.enabled) return null;
+      const bw = canvasW || DB_LAST_BASE.w, bh = canvasH || DB_LAST_BASE.h;
+      let t = DB_CROP.top, b = DB_CROP.bottom, l = DB_CROP.left, r = DB_CROP.right;
+      if (bw > 0 && bh > 0) {
+        t = Math.max(0, Math.min(t, bh - 20 - b));
+        b = Math.max(0, Math.min(b, bh - 20 - t));
+        l = Math.max(0, Math.min(l, bw - 20 - r));
+        r = Math.max(0, Math.min(r, bw - 20 - l));
+      }
+      if (!(t > 0 || b > 0 || l > 0 || r > 0)) return null;
+      return { top: t, bottom: b, left: l, right: r };
+    }
+
+    // 裁边 + 拉伸 合并为一次 drawImage（省一次插值）。两者都没开 → 原样返回
+    function dbCropAndFit(canvas) {
+      if (!canvas || !canvas.width || !canvas.height) return canvas;
+      if (!dbGetParams()) return canvas;   // 去糊未启用：与 dbApply 一致，不处理
+      const c = dbGetCrop(canvas.width, canvas.height);
+      const dev = dbGetDeviceSize();
+      const chk = document.getElementById('dbStretch');
+      const stretch = !!(chk && chk.checked) && dev.w > 0 && dev.h > 0;
+      if (!c && !stretch) return canvas;
+      const l = c ? c.left : 0, t = c ? c.top : 0, r = c ? c.right : 0, b = c ? c.bottom : 0;
+      const sw = canvas.width - l - r, sh = canvas.height - t - b;
+      const dw = stretch ? dev.w : sw, dh = stretch ? dev.h : sh;
+      if (sw < 2 || sh < 2 || dw < 2 || dh < 2) return canvas;
+      const out = document.createElement('canvas');
+      out.width = Math.round(dw); out.height = Math.round(dh);
+      const g = out.getContext('2d');
+      g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+      g.drawImage(canvas, l, t, sw, sh, 0, 0, out.width, out.height);
+      return out;
+    }
+
+    // 靛蓝遮罩：把「将被裁掉」的四边盖上半透明靛蓝。
+    // canvas 可以是拉伸后的画布，此时按 baseW/baseH → 当前画布的比例换算遮罩位置。
+    function dbOverlayCrop(canvas, c, baseW, baseH) {
+      if (!canvas || !c) return canvas;
+      const kx = canvas.width / (baseW || canvas.width);
+      const ky = canvas.height / (baseH || canvas.height);
+      const out = document.createElement('canvas');
+      out.width = canvas.width; out.height = canvas.height;
+      const g = out.getContext('2d');
+      g.drawImage(canvas, 0, 0);
+      g.fillStyle = 'rgba(79,70,229,0.45)';   // 与页面主按钮同色（#4f46e5）的半透明
+      const W = canvas.width, H = canvas.height;
+      const t = c.top * ky, b = c.bottom * ky, l = c.left * kx, r = c.right * kx;
+      if (t > 0) g.fillRect(0, 0, W, t);
+      if (b > 0) g.fillRect(0, H - b, W, b);
+      if (l > 0) g.fillRect(0, 0, l, H);
+      if (r > 0) g.fillRect(W - r, 0, r, H);
+      return out;
+    }
+
+    // 自动识别留白：在 ~300px 缩略图上扫描非白像素的包围盒，反推四边留白（base 空间 px）。
+    // 用缩略图是为了速度——整分辨率 getImageData 全扫每页要 20~40ms，缩略图只要 1~2ms。
+    function dbDetectCrop(canvas) {
+      if (!canvas || !canvas.width || !canvas.height) return null;
+      const TW = 300;
+      const k = Math.min(1, TW / canvas.width);
+      const tw = Math.max(1, Math.round(canvas.width * k));
+      const th = Math.max(1, Math.round(canvas.height * k));
+      const c = document.createElement('canvas');
+      c.width = tw; c.height = th;
+      const g = c.getContext('2d', { willReadFrequently: true });
+      g.drawImage(canvas, 0, 0, tw, th);
+      let data;
+      try { data = g.getImageData(0, 0, tw, th).data; } catch (e) { return null; }
+      const TH = 235;                       // 亮度阈值：低于它算「有内容」
+      let minX = tw, maxX = -1, minY = th, maxY = -1;
+      for (let y = 0; y < th; y++) {
+        for (let x = 0; x < tw; x++) {
+          const i = (y * tw + x) * 4;
+          if (data[i + 3] > 8 && (data[i] < TH || data[i + 1] < TH || data[i + 2] < TH)) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+      if (maxX < 0) return null;            // 整页都是白的，无从判断
+      const sx = canvas.width / tw, sy = canvas.height / th;
+      return {
+        top: Math.round(minY * sy),
+        bottom: Math.round((th - 1 - maxY) * sy),
+        left: Math.round(minX * sx),
+        right: Math.round((tw - 1 - maxX) * sx),
+      };
+    }
+
+    // 把图放到「设备屏幕」画布上：等比缩放居中，留白填白 —— 即模拟 Kindle「整页」看到的样子。
+    // 尺寸已经等于设备宽高（拉伸后）时直接返回，不产生白边。
+    function dbScreenOf(canvas, w, h) {
+      if (!canvas || !canvas.width || !canvas.height || w <= 0 || h <= 0) return canvas;
+      if (canvas.width === w && canvas.height === h) return canvas;
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const g = c.getContext('2d');
+      g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
+      const k = Math.min(w / canvas.width, h / canvas.height);
+      const dw = canvas.width * k, dh = canvas.height * k;
+      g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+      g.drawImage(canvas, Math.round((w - dw) / 2), Math.round((h - dh) / 2), dw, dh);
+      return c;
     }
 
     // 由去糊后的 canvas 生成库列表缩略图（dataURL）
@@ -1522,7 +1681,8 @@
       c.width = bmp.width; c.height = bmp.height;
       c.getContext('2d').drawImage(bmp, 0, 0);
       if (bmp.close) bmp.close();
-      const work = dbApply(c);   // dbApply 内部读开关：关闭时原样返回
+      // dbApply 内部读去糊开关（关闭时原样返回）；随后一次性完成 裁边 + 拉伸
+      const work = dbCropAndFit(dbApply(c));
       return { canvas: work, dataUrl: work.toDataURL('image/jpeg', 0.92) };
     }
 
@@ -2355,6 +2515,8 @@
     const DB_PARAMS = {
       width:      { min:300, max:2000, step:1,   def:1236, label:'目标宽度 (px)',
         tip:'去糊后图的像素宽度。设为你的 Kindle 真实屏宽，可避免设备端二次放大发糊；选「保留原图尺寸」则不改大小。' },
+      height:     { min:300, max:3000, step:1,   def:1648, label:'目标高度 (px)',
+        tip:'去糊后图的像素高度。设为你的 Kindle 真实屏高；选「保留原图尺寸」则不改大小。' },
       contrast:   { min:-100, max:100,  step:1,   def:20,   label:'对比度',
         tip:'增强明暗反差。调高让线条和小字更"立"、更清晰；电子墨水屏偏灰，建议 +20～40。负值会让画面发灰变糊。' },
       gamma:      { min:0.5,  max:2,    step:0.05,def:1,    label:'伽马 (Gamma)',
@@ -2377,7 +2539,7 @@
       const statusEl = document.getElementById('dbStatus');
       const statusMsg = m => { if (statusEl) statusEl.textContent = m; };
       let srcImg = null, previewTimer = null;
-      function schedulePreview() { clearTimeout(previewTimer); previewTimer = setTimeout(renderPreview, 120); }
+      function schedulePreview() { updateProcTitle(); clearTimeout(previewTimer); previewTimer = setTimeout(renderPreview, 120); }
 
       function setParam(key, val) {
         const c = controls[key]; if (!c) return;
@@ -2410,6 +2572,7 @@
           num.value = fmt(v);
           vtag.textContent = fmt(v);
           if (key === 'width') syncDeviceOnManualWidth(v);
+          if (key === 'height') syncDeviceOnManualHeight(v);
           schedulePreview();
         };
         // 输入框驱动：输入过程中不动滑块/生效值（允许任意数字与空），
@@ -2425,6 +2588,7 @@
           num.value = fmt(snap);                              // 确认后输入框显示生效值（越界则显示 max/min）
           vtag.textContent = fmt(snap);                       // 标签显示生效值
           if (key === 'width') syncDeviceOnManualWidth(snap);
+          if (key === 'height') syncDeviceOnManualHeight(snap);
           schedulePreview();
         };
         let editStart = fmt(p.def);                            // 点击输入框前的生效值，失焦空/非法时退回
@@ -2434,19 +2598,164 @@
         rng.addEventListener('input', () => setFromRange(rng.value));
         setFromRange(p.def);
       }
+      updateProcTitle();   // 初始标题：去糊后（宽×高 · 实时）
 
       function syncDeviceOnManualWidth(val) {
         const w = parseInt(deviceSel.value, 10);
         if (w > 0 && val !== w) deviceSel.value = '0';
       }
+      // 手动改高度且与该机型屏高不符 → 同样视为「自定义宽度」
+      function syncDeviceOnManualHeight(val) {
+        const w = parseInt(deviceSel.value, 10);
+        if (w <= 0) return;
+        const h = parseInt(deviceSel.selectedOptions[0]?.dataset.h || '0', 10);
+        if (h > 0 && val !== h) deviceSel.value = '0';
+      }
       function applyDevice() {
         const v = deviceSel.value;
-        if (v === '-1') { controls.width.num.disabled = true; controls.width.rng.disabled = true; return; }
-        controls.width.num.disabled = false; controls.width.rng.disabled = false;
+        const setDisabled = (key, d) => {
+          const c = controls[key]; if (!c) return;
+          c.num.disabled = d; c.rng.disabled = d;
+        };
+        if (v === '-1') { setDisabled('width', true); setDisabled('height', true); updateProcTitle(); return; }
+        setDisabled('width', false); setDisabled('height', false);
         const w = parseInt(v, 10);
-        if (w > 0) setParam('width', w);
+        if (w > 0) {
+          setParam('width', w);
+          const h = parseInt(deviceSel.selectedOptions[0]?.dataset.h || '0', 10);
+          if (h > 0) setParam('height', h);
+        }
+        updateProcTitle();
+      }
+      // 去糊后预览标题：显示当前的设备目标尺寸（读「目标宽度 / 目标高度」）
+      function updateProcTitle() {
+        const el = document.getElementById('dbPTitleProc');
+        if (!el) return;
+        const sel = document.getElementById('dbDevice');
+        if (sel && sel.value === '-1') { el.textContent = '去糊后（原图尺寸）· 实时'; return; }
+        const cw = controls.width, ch = controls.height;
+        const w = Math.round(cw ? parseFloat(cw.rng.value) : 0);
+        const h = Math.round(ch ? parseFloat(ch.rng.value) : 0);
+        el.textContent = (w > 0 && h > 0) ? ('去糊后（' + w + '×' + h + '）· 实时') : '去糊后 · 实时';
       }
       deviceSel.addEventListener('change', () => { applyDevice(); schedulePreview(); updateDbLibBar(); });
+      // 拉伸开关：切换后立即重渲染预览（其它开关沿用原有按需刷新）
+      const stretchChk = document.getElementById('dbStretch');
+      if (stretchChk) stretchChk.addEventListener('change', schedulePreview);
+
+      // ---------- 裁边 ----------
+      // 四组控件复用 .krow 结构，顺序与「目标宽度」等参数行一致：输入框在前、拉条在后
+      const CROP_KEYS = ['top', 'bottom', 'left', 'right'];
+      const CROP_LABEL = { top: '上', bottom: '下', left: '左', right: '右' };
+      const cropCtl = {};
+      let dbNeedDetect = false;             // 自动模式下是否需要在下次渲染时识别一次
+      const cropEnChk = document.getElementById('dbCropEnable');
+      const cropAutoChk = document.getElementById('dbCropAuto');
+      const cropBody = document.getElementById('kCropBody');
+      const cropPageInp = document.getElementById('dbCropPage');
+      const cropBox = document.getElementById('kCropParams');
+
+      function cropLimit(key) {
+        const B = DB_LAST_BASE;
+        if (!B.w || !B.h) return 600;
+        if (key === 'top') return Math.max(0, B.h - 20 - DB_CROP.bottom);
+        if (key === 'bottom') return Math.max(0, B.h - 20 - DB_CROP.top);
+        if (key === 'left') return Math.max(0, B.w - 20 - DB_CROP.right);
+        return Math.max(0, B.w - 20 - DB_CROP.left);
+      }
+      function setCropVal(key, v, fromUser) {
+        v = Math.max(0, Math.round(parseFloat(v) || 0));
+        v = Math.min(v, cropLimit(key));
+        DB_CROP[key] = v;
+        const c = cropCtl[key];
+        if (c) {
+          if (parseFloat(c.rng.value) !== v) c.rng.value = v;
+          if (c.num.value !== String(v)) c.num.value = v;
+          c.vtag.textContent = v;
+        }
+        // 手动改过任一数值 → 切到「手动」，避免下次自动识别把它覆盖掉
+        if (fromUser && cropAutoChk && cropAutoChk.checked) cropAutoChk.checked = false, DB_CROP.auto = false;
+        if (fromUser) schedulePreview();
+      }
+      function syncCropUI() { CROP_KEYS.forEach(k => setCropVal(k, DB_CROP[k], false)); }
+      function refreshCropMaxes() {
+        const B = DB_LAST_BASE;
+        const vmax = Math.max(1, (B.h || 600) - 20), hmax = Math.max(1, (B.w || 600) - 20);
+        if (cropCtl.top) { cropCtl.top.rng.max = vmax; cropCtl.bottom.rng.max = vmax; }
+        if (cropCtl.left) { cropCtl.left.rng.max = hmax; cropCtl.right.rng.max = hmax; }
+      }
+      if (cropBox) {
+        for (const key of CROP_KEYS) {
+          const row = document.createElement('div');
+          row.className = 'krow';
+          row.innerHTML =
+            '<div class="klabel"><span>' + CROP_LABEL[key] + '</span><b></b></div>' +
+            '<div class="kprow">' +
+              '<input type="number" step="1">' +
+              '<input type="range" min="0" max="600" step="1">' +
+            '</div>';
+          cropBox.appendChild(row);
+          const num = row.querySelector('input[type=number]');
+          const rng = row.querySelector('input[type=range]');
+          const vtag = row.querySelector('b');
+          num.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); num.blur(); } });
+          num.addEventListener('blur', () => setCropVal(key, num.value, true));
+          rng.addEventListener('input', () => setCropVal(key, rng.value, true));
+          cropCtl[key] = { num, rng, vtag };
+          setCropVal(key, 0, false);
+        }
+      }
+      // 对给定画布跑一次识别并把结果填进四个控件
+      function detectFrom(canvas) {
+        const det = dbDetectCrop(canvas);
+        if (!det) { statusMsg('⚠️ 没识别到留白（整页可能都是画面，或整页全白）'); return false; }
+        DB_CROP.top = det.top; DB_CROP.bottom = det.bottom;
+        DB_CROP.left = det.left; DB_CROP.right = det.right;
+        syncCropUI();
+        statusMsg('已识别留白：上 ' + det.top + ' / 下 ' + det.bottom + ' / 左 ' + det.left + ' / 右 ' + det.right);
+        return true;
+      }
+      if (cropEnChk) cropEnChk.addEventListener('change', () => {
+        DB_CROP.enabled = cropEnChk.checked;
+        if (cropBody) cropBody.style.display = DB_CROP.enabled ? '' : 'none';
+        if (DB_CROP.enabled && DB_CROP.auto) dbNeedDetect = true;
+        syncCropModeUI(); schedulePreview();
+      });
+      if (cropAutoChk) cropAutoChk.addEventListener('change', () => {
+        DB_CROP.auto = cropAutoChk.checked;
+        if (DB_CROP.auto && DB_CROP.enabled) dbNeedDetect = true;
+        syncCropModeUI(); schedulePreview();
+      });
+      if (cropPageInp) cropPageInp.addEventListener('change', () => {
+        DB_CROP.page = Math.max(1, parseInt(cropPageInp.value, 10) || 1);
+        cropPageInp.value = DB_CROP.page;
+        if (DB_CROP.enabled && DB_CROP.auto && dbCurPdfDoc) {
+          dbNeedDetect = true;
+          dbShowPdfPage(Math.min(DB_CROP.page, dbCurPageCount || 1));   // 跳到该页并识别
+        } else if (DB_CROP.enabled && DB_CROP.auto) {
+          dbNeedDetect = true; schedulePreview();
+        }
+      });
+      const cropDetectBtn = document.getElementById('dbCropDetect');
+      if (cropDetectBtn) cropDetectBtn.addEventListener('click', () => {
+        if (!srcImg) { statusMsg('请先上传一张测试图片，或在 PDF 库单选一个文件'); return; }
+        if (detectFrom(DB_LAST_BASE_C || dbApply(srcImg))) schedulePreview();
+      });
+      const cropClearBtn = document.getElementById('dbCropClear');
+      if (cropClearBtn) cropClearBtn.addEventListener('click', () => {
+        DB_CROP.top = DB_CROP.bottom = DB_CROP.left = DB_CROP.right = 0;
+        if (cropAutoChk) cropAutoChk.checked = false;   // 归零后切手动，防止被自动识别覆盖
+        DB_CROP.auto = false;
+        syncCropUI(); syncCropModeUI(); schedulePreview();
+      });
+      // 「手动裁边」：打开去糊后的放大图（与点击去糊缩略图效果一致），
+      // 方便放大对照着调四边数值。勾选「自动识别」时置灰。
+      const cropManualBtn = document.getElementById('dbCropManual');
+      function syncCropModeUI() {
+        if (cropManualBtn) cropManualBtn.disabled = !DB_CROP.enabled || DB_CROP.auto;
+      }
+      if (cropManualBtn) cropManualBtn.addEventListener('click', () => { openCropEditor(); });
+      syncCropModeUI();   // 初始：裁边关闭 → 置灰
 
       function refreshEnabled() {
         const on = enableChk.checked;
@@ -2473,15 +2782,41 @@
       }
       // 最近一次渲染的全尺寸 canvas（原图 / 去糊后），供点击放大时取高清图
       // （预览画布被缩到 ~220px，直接 toDataURL 会得到模糊小图）
-      let dbLastOrigC = null, dbLastProcC = null;
+      // dbLastProcScreen 是「去糊后 + 设备屏模拟」的全尺寸画布，仅用于预览/放大；
+      // 导出与真实去糊用的是 dbLastProcC（不含模拟白边）。
+      let dbLastOrigC = null, dbLastProcC = null, dbLastProcScreen = null;
       function renderPreview() {
         if (!srcImg) return;
         const p = dbGetParams() || { width: 0, upscale: true };
         const origC = (p.width > 0) ? dbResizeToWidth(srcImg, p.width, p.upscale) : srcImg;
-        const procC = dbApply(srcImg);
-        dbLastOrigC = origC; dbLastProcC = procC;
+        const baseC = dbApply(srcImg);                 // 重采样 + 去糊（尚未裁边、未拉伸）
+        DB_LAST_BASE = { w: baseC.width, h: baseC.height };
+        DB_LAST_BASE_C = baseC;
+        refreshCropMaxes();
+        // 自动模式：换图 / 换书 / 刚开启时按识别源页识别一次，结果套用全书
+        if (DB_CROP.enabled && DB_CROP.auto && dbNeedDetect) {
+          dbNeedDetect = false;
+          detectFrom(baseC);
+        }
+        const crop = dbGetCrop(baseC.width, baseC.height);
+        const dev = dbGetDeviceSize();
+        const stretchOn = !!(document.getElementById('dbStretch') || {}).checked && dev.w > 0 && dev.h > 0;
+        // 预览视图：base（未裁）→ 拉伸（若开）→ 靛蓝遮罩 → 设备屏，白边与待裁区都可见
+        let viewC = baseC;
+        if (stretchOn) {
+          const sc = document.createElement('canvas');
+          sc.width = dev.w; sc.height = dev.h;
+          const sg = sc.getContext('2d');
+          sg.imageSmoothingEnabled = true; sg.imageSmoothingQuality = 'high';
+          sg.drawImage(baseC, 0, 0, dev.w, dev.h);
+          viewC = sc;
+        }
+        viewC = dbOverlayCrop(viewC, crop, baseC.width, baseC.height);
+        const procScreen = dbScreenOf(viewC, dev.w, dev.h);   // 模拟 Kindle「整页」
+        const procC = dbCropAndFit(baseC);                    // 真实输出：裁边 + 拉伸
+        dbLastOrigC = origC; dbLastProcC = procC; dbLastProcScreen = procScreen;
         drawPrev(prevOrig, origC);
-        drawPrev(prevProc, procC);
+        drawPrev(prevProc, procScreen);
       }
       imgInput.addEventListener('change', e => {
         const f = e.target.files[0]; if (!f) return;
@@ -2490,7 +2825,7 @@
         updateDbPageInput(1);
         const url = URL.createObjectURL(f);
         const im = new Image();
-        im.onload = () => { srcImg = im; renderPreview(); URL.revokeObjectURL(url); statusMsg('已加载本地图片（原图）'); setPickMode(true); };
+        im.onload = () => { srcImg = im; dbNeedDetect = true; renderPreview(); URL.revokeObjectURL(url); statusMsg('已加载本地图片（原图）'); setPickMode(true); };
         im.onerror = () => { URL.revokeObjectURL(url); };
         im.src = url; e.target.value = '';
       });
@@ -2517,7 +2852,9 @@
           if (typeof PDFLib === 'undefined') { statusMsg('⚠️ pdf-lib 未加载，无法生成测试 PDF'); return; }
           const doc = await PDFLib.PDFDocument.create();
           // 两页：第 1 页原图、第 2 页去糊后，传到设备上翻页即可对比
-          for (const cv of [origC, procC]) {
+          // 裁边 / 拉伸对两页同样生效，保证尺寸一致、对比公平
+          for (const src of [origC, procC]) {
+            const cv = dbCropAndFit(src);
             const img = await doc.embedJpg(cv.toDataURL('image/jpeg', 0.92));
             const page = doc.addPage([cv.width, cv.height]);
             page.drawImage(img, { x: 0, y: 0, width: cv.width, height: cv.height });
@@ -2545,6 +2882,9 @@
           upscale: document.getElementById('dbUpscale').checked,
           dither: document.getElementById('dbDither').checked,
           purebw: document.getElementById('dbPurebw').checked,
+          stretch: document.getElementById('dbStretch').checked,
+          crop: { enabled: DB_CROP.enabled, auto: DB_CROP.auto, page: DB_CROP.page,
+                  top: DB_CROP.top, bottom: DB_CROP.bottom, left: DB_CROP.left, right: DB_CROP.right },
           enabled: enableChk.checked };
       }
       function applyPreset(d) {
@@ -2554,6 +2894,17 @@
         document.getElementById('dbUpscale').checked = !!d.upscale;
         document.getElementById('dbDither').checked = !!d.dither;
         document.getElementById('dbPurebw').checked = !!d.purebw;
+        document.getElementById('dbStretch').checked = !!d.stretch;
+        if (d.crop && cropEnChk) {
+          DB_CROP.enabled = !!d.crop.enabled; cropEnChk.checked = DB_CROP.enabled;
+          DB_CROP.auto = d.crop.auto !== false; if (cropAutoChk) cropAutoChk.checked = DB_CROP.auto;
+          DB_CROP.page = Math.max(1, parseInt(d.crop.page, 10) || 1);
+          if (cropPageInp) cropPageInp.value = DB_CROP.page;
+          DB_CROP.top = d.crop.top || 0; DB_CROP.bottom = d.crop.bottom || 0;
+          DB_CROP.left = d.crop.left || 0; DB_CROP.right = d.crop.right || 0;
+          if (cropBody) cropBody.style.display = DB_CROP.enabled ? '' : 'none';
+          syncCropUI(); syncCropModeUI();
+        }
         if (enableChk) enableChk.checked = (d.enabled !== false);   // 主开关：默认开启
         refreshEnabled();   // 同步面板禁用态
         schedulePreview();
@@ -2564,6 +2915,14 @@
         document.getElementById('dbUpscale').checked = true;
         document.getElementById('dbDither').checked = false;   // 抖动计算量大，默认关
         document.getElementById('dbPurebw').checked = false;
+        document.getElementById('dbStretch').checked = false;   // 非等比变形，默认关
+        if (cropEnChk) cropEnChk.checked = false;               // 裁边默认关
+        DB_CROP.enabled = false; DB_CROP.auto = true; DB_CROP.page = 1;
+        DB_CROP.top = DB_CROP.bottom = DB_CROP.left = DB_CROP.right = 0;
+        if (cropAutoChk) cropAutoChk.checked = true;
+        if (cropPageInp) cropPageInp.value = 1;
+        if (cropBody) cropBody.style.display = 'none';
+        syncCropUI(); syncCropModeUI();
         if (enableChk) enableChk.checked = true;
         refreshEnabled();
         schedulePreview();
@@ -2617,7 +2976,11 @@
           dbCurRecName = rec.name || '';
           updateDbPageInput(1);
           if (!dbCurPageCount) { statusMsg('⚠️ 该 PDF 没有页面'); return; }
-          await dbShowPdfPage(1);
+          // 自动裁边：直接跳到「识别源页」再渲染，好让识别就发生在那一页
+          dbNeedDetect = true;
+          const startPage = (DB_CROP.enabled && DB_CROP.auto)
+            ? Math.min(Math.max(1, DB_CROP.page || 1), dbCurPageCount) : 1;
+          await dbShowPdfPage(startPage);
         } catch (e) { statusMsg('⚠️ 读取失败：' + e.message); }
       };
       // 页码输入框：跳页预览
@@ -2649,18 +3012,164 @@
       // 预览图点击放大（左右任一图均可）
       const dbLightbox = document.getElementById('dbLightbox');
       const dbLightboxImg = document.getElementById('dbLightboxImg');
+      // 打开高清放大图。优先用「最近一次渲染的全尺寸 canvas」，避免把 220px 缩略图放大成糊图
+      function openLightbox(canvas) {
+        if (!canvas || !canvas.width || !canvas.height) return false;
+        if (!dbLightbox || !dbLightboxImg) return false;
+        // 普通放大：只显示带靛蓝遮罩的图（哪里会被裁掉），不进入编辑态、不显示调整点
+        dbLightboxImg.onload = null;
+        cropEditing = false;
+        if (cropCv) cropCv.style.display = 'none';
+        if (cropBar) cropBar.style.display = 'none';
+        dbLightboxImg.src = canvas.toDataURL('image/png');
+        dbLightbox.style.display = 'flex';
+        return true;
+      }
       [document.getElementById('dbPrevOrig'), document.getElementById('dbPrevProc')].forEach((cv, idx) => {
         if (!cv) return;
         cv.style.cursor = 'zoom-in';
         cv.addEventListener('click', () => {
-          // 优先取「最近一次渲染的全尺寸 canvas」，避免把 220px 缩略图放大成糊图
-          const hi = (idx === 0 ? dbLastOrigC : dbLastProcC) || cv;
-          if (!hi || !hi.width || !hi.height || !dbLightbox) return;
-          dbLightboxImg.src = hi.toDataURL('image/png');
-          dbLightbox.style.display = 'flex';
+          openLightbox((idx === 0 ? dbLastOrigC : dbLastProcScreen) || cv);
         });
       });
-      if (dbLightbox) dbLightbox.addEventListener('click', () => { dbLightbox.style.display = 'none'; });
+      if (dbLightbox) dbLightbox.addEventListener('click', () => {
+        if (cropEditing) return;          // 裁边编辑中：不响应「点任意处关闭」
+        dbLightbox.style.display = 'none';
+      });
+
+      // ---------- 裁边：放大图上的拖拽裁剪框（手机相册式）----------
+      // 编辑对象是 base 画布（重采样+去糊、未裁边），裁边值本来就定义在这个坐标系里，
+      // 所以画布像素与裁边值是 1:1 换算，不用考虑设备屏留白干扰。
+      const cropCv = document.getElementById('dbCropCanvas');
+      const cropBar = document.getElementById('dbCropBar');
+      let cropEditing = false, cropDrag = null, cropSnapshot = null;
+
+      function cropBase() { return DB_LAST_BASE.w ? DB_LAST_BASE : { w: 0, h: 0 }; }
+      function cropRectDisplay() {
+        const B = cropBase();
+        const bw = B.w || cropCv.width, bh = B.h || cropCv.height;
+        const kx = cropCv.width / bw, ky = cropCv.height / bh;
+        const c = dbGetCrop();
+        const t = c ? c.top : 0, b = c ? c.bottom : 0, l = c ? c.left : 0, r = c ? c.right : 0;
+        return { x: l * kx, y: t * ky, w: (bw - l - r) * kx, h: (bh - t - b) * ky };
+      }
+      function drawCropHandles() {
+        if (!cropCv) return;
+        const W = cropCv.width, H = cropCv.height, g = cropCv.getContext('2d');
+        g.clearRect(0, 0, W, H);
+        const R = cropRectDisplay();
+        g.fillStyle = 'rgba(79,70,229,0.45)';                  // 与主按钮同色
+        g.fillRect(0, 0, W, R.y);                              // 上
+        g.fillRect(0, R.y + R.h, W, H - R.y - R.h);            // 下
+        g.fillRect(0, R.y, R.x, R.h);                          // 左
+        g.fillRect(R.x + R.w, R.y, W - R.x - R.w, R.h);        // 右
+        g.strokeStyle = '#4f46e5'; g.lineWidth = 2;
+        g.strokeRect(R.x, R.y, R.w, R.h);
+        g.fillStyle = '#4f46e5';
+        const s = 11;
+        [[R.x + R.w / 2, R.y], [R.x + R.w / 2, R.y + R.h], [R.x, R.y + R.h / 2], [R.x + R.w, R.y + R.h / 2],
+         [R.x, R.y], [R.x + R.w, R.y], [R.x, R.y + R.h], [R.x + R.w, R.y + R.h]]
+          .forEach(p => g.fillRect(p[0] - s / 2, p[1] - s / 2, s, s));
+      }
+      const EDGE_PARTS = { top: ['t'], bottom: ['b'], left: ['l'], right: ['r'],
+                           tl: ['t', 'l'], tr: ['t', 'r'], bl: ['b', 'l'], br: ['b', 'r'] };
+      function hitCropEdge(px, py) {
+        const R = cropRectDisplay(), tol = 20;                 // 手指也点得中的容差
+        const near = (a, b) => Math.abs(a - b) <= tol;
+        const x2 = R.x + R.w, y2 = R.y + R.h;
+        if (near(px, R.x) && near(py, R.y)) return 'tl';
+        if (near(px, x2) && near(py, R.y)) return 'tr';
+        if (near(px, R.x) && near(py, y2)) return 'bl';
+        if (near(px, x2) && near(py, y2)) return 'br';
+        if (near(py, R.y) && px > R.x && px < x2) return 'top';
+        if (near(py, y2) && px > R.x && px < x2) return 'bottom';
+        if (near(px, R.x) && py > R.y && py < y2) return 'left';
+        if (near(px, x2) && py > R.y && py < y2) return 'right';
+        return null;
+      }
+      function alignCropCanvas() {
+        if (!cropCv || !dbLightboxImg) return;
+        const r = dbLightboxImg.getBoundingClientRect();
+        if (!r.width || !r.height) return;
+        cropCv.width = Math.round(r.width); cropCv.height = Math.round(r.height);
+        cropCv.style.width = r.width + 'px'; cropCv.style.height = r.height + 'px';
+        cropCv.style.display = 'block';
+        drawCropHandles();
+      }
+      function openCropEditor() {
+        const base = DB_LAST_BASE_C;
+        if (!base || !base.width || !dbLightbox) { statusMsg('请先上传一张测试图片，或在 PDF 库单选一个文件'); return; }
+        cropSnapshot = { top: DB_CROP.top, bottom: DB_CROP.bottom, left: DB_CROP.left, right: DB_CROP.right };
+        // 编辑态：图片压矮一点，给底部按钮留位（普通放大不带这个 class，尺寸不变）
+        if (dbLightbox) dbLightbox.classList.add('cropping');
+        dbLightboxImg.src = base.toDataURL('image/png');
+        dbLightbox.style.display = 'flex';
+        cropEditing = true;
+        if (cropBar) cropBar.style.display = 'flex';
+        // 仅在仍处于编辑态时才对齐画布（防止该 onload 被后续普通放大复用）
+        dbLightboxImg.onload = () => { if (cropEditing) alignCropCanvas(); };
+        if (dbLightboxImg.complete) alignCropCanvas();
+      }
+      function closeCropEditor(apply) {
+        cropEditing = false;
+        if (!apply && cropSnapshot) {
+          DB_CROP.top = cropSnapshot.top; DB_CROP.bottom = cropSnapshot.bottom;
+          DB_CROP.left = cropSnapshot.left; DB_CROP.right = cropSnapshot.right;
+          syncCropUI();
+        }
+        cropSnapshot = null;
+        if (cropCv) cropCv.style.display = 'none';
+        if (cropBar) cropBar.style.display = 'none';
+        if (dbLightbox) dbLightbox.classList.remove('cropping');
+        dbLightbox.style.display = 'none';
+        if (apply) schedulePreview();
+      }
+      if (cropCv) {
+        cropCv.addEventListener('pointerdown', e => {
+          if (!cropEditing) return;
+          const r = cropCv.getBoundingClientRect();
+          const edge = hitCropEdge(e.clientX - r.left, e.clientY - r.top);
+          if (!edge) return;
+          cropDrag = { edge, sx: e.clientX, sy: e.clientY, start: { top: DB_CROP.top, bottom: DB_CROP.bottom, left: DB_CROP.left, right: DB_CROP.right } };
+          try { cropCv.setPointerCapture(e.pointerId); } catch (_) {}
+          e.preventDefault(); e.stopPropagation();
+        });
+        cropCv.addEventListener('pointermove', e => {
+          if (!cropDrag || !cropEditing) return;
+          const B = cropBase();
+          const bw = B.w || cropCv.width, bh = B.h || cropCv.height;
+          const kx = bw / cropCv.width, ky = bh / cropCv.height;
+          const dx = Math.round((e.clientX - cropDrag.sx) * kx);
+          const dy = Math.round((e.clientY - cropDrag.sy) * ky);
+          const s = cropDrag.start, parts = EDGE_PARTS[cropDrag.edge] || [];
+          let top = s.top, bottom = s.bottom, left = s.left, right = s.right;
+          if (parts.indexOf('t') >= 0) top = s.top + dy;
+          if (parts.indexOf('b') >= 0) bottom = s.bottom - dy;
+          if (parts.indexOf('l') >= 0) left = s.left + dx;
+          if (parts.indexOf('r') >= 0) right = s.right - dx;
+          top = Math.max(0, top); bottom = Math.max(0, bottom);
+          left = Math.max(0, left); right = Math.max(0, right);
+          if (bh) { const room = bh - 20; if (top + bottom > room) { if (parts.indexOf('t') >= 0) top = Math.max(0, room - bottom); else bottom = Math.max(0, room - top); } }
+          if (bw) { const room = bw - 20; if (left + right > room) { if (parts.indexOf('l') >= 0) left = Math.max(0, room - right); else right = Math.max(0, room - left); } }
+          DB_CROP.top = top; DB_CROP.bottom = bottom; DB_CROP.left = left; DB_CROP.right = right;
+          if (cropAutoChk && cropAutoChk.checked) { cropAutoChk.checked = false; DB_CROP.auto = false; syncCropModeUI(); }
+          syncCropUI();            // 只同步控件
+          drawCropHandles();       // 只重画裁剪框（不重跑去糊，否则拖不动）
+          e.preventDefault();
+        });
+        const endDrag = e => {
+          if (!cropDrag) return;
+          cropDrag = null;
+          try { cropCv.releasePointerCapture(e.pointerId); } catch (_) {}
+          schedulePreview();       // 松手后才真正重渲染一次
+        };
+        cropCv.addEventListener('pointerup', endDrag);
+        cropCv.addEventListener('pointercancel', endDrag);
+      }
+      const cropOkBtn = document.getElementById('dbCropOk');
+      const cropCancelBtn = document.getElementById('dbCropCancel');
+      if (cropOkBtn) cropOkBtn.addEventListener('click', e => { e.stopPropagation(); closeCropEditor(true); });
+      if (cropCancelBtn) cropCancelBtn.addEventListener('click', e => { e.stopPropagation(); closeCropEditor(false); });
       try { const s = localStorage.getItem(DB_STORE); if (s) applyPreset(JSON.parse(s)); } catch (e) {}
 
       // PDF 库「去糊 / 去启用」按钮：未启用 → 跳去糊设置；启用 → 对勾选的文件依次去糊
