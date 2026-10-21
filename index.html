@@ -1031,7 +1031,8 @@
           return;
         }
 
-        const baseName = file.name.replace(/\.zip$/i, '');
+        // 去掉 .zip 或 .cbz 后缀（cbz 就是改名过的 zip），否则会生成「71-75.cbz.pdf」
+        const baseName = file.name.replace(/\.(zip|cbz)$/i, '');
         const startChapter = parseStartChapter(baseName);
         let convDone = 0;
         let allSkipped = [];
