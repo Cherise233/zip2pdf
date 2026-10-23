@@ -2199,6 +2199,7 @@
     // ============ 暂停 / 取消 控制 ============
     let legadoMemTimer = null;   // 堆内存读数定时器（legado 操作期间自动刷新）
     const legadoCtrl = { aborted:false, paused:false, lastStatus:null };
+    const legadoActiveCtrl = new Set();   // 进行中的 fetch 控制器，取消时立即中止在飞请求
     function legadoHideCtrl(){
       $('#btnPause').style.display='none'; $('#btnCancel').style.display='none';
       $('#btnPause').textContent='暂停';
@@ -2221,16 +2222,20 @@
     async function legadoApi(path, timeout){
       const base = $('#legadoBase').value.trim().replace(/\/+$/,'');
       const ctrl = new AbortController();
+      legadoActiveCtrl.add(ctrl);
       const timer = setTimeout(()=>ctrl.abort(), timeout || LEGADO_TIMEOUT);
       let res;
       try{
         res = await fetch(base + path, {mode:'cors', cache:'no-store', signal: ctrl.signal});
       }catch(e){
-        clearTimeout(timer);
-        const msg = (e.name==='AbortError') ? ('请求超时(>'+ (LEGADO_TIMEOUT/1000) +'s)') : e.message;
+        const msg = (e.name==='AbortError')
+          ? (legadoCtrl.aborted ? '已取消' : ('请求超时(>'+ (LEGADO_TIMEOUT/1000) +'s)'))
+          : e.message;
         throw new Error(msg + ' @ ' + path);
+      }finally{
+        clearTimeout(timer);
+        legadoActiveCtrl.delete(ctrl);
       }
-      clearTimeout(timer);
       if(!res.ok) throw new Error('HTTP '+res.status+' @ '+path);
       return res;
     }
@@ -2392,6 +2397,7 @@
       const timeout = (opts && opts.timeout != null) ? opts.timeout : LEGADO_TIMEOUT;
       let lastErr='';
       for(let a=0; a<retries; a++){
+        if(legadoCtrl.aborted) break;   // 取消后不再重试
         try{
           const jpg = await downloadToJpeg(bookUrl, it.src, timeout);
           const broken = jpg.size < PLACEHOLDER_BYTES || jpg.variance < VAR_THRESHOLD;
@@ -2484,20 +2490,24 @@
 
         setLegadoStatus('开始逐话取图（并发 '+CONC+'，每话存库后释放内存）…');
         legadoMemStart();   // 启动堆内存自动刷新
-        let done=0, brokenTotal=0, okChapters=0, builtCnt=0;
+        let done=0, brokenTotal=0, okChapters=0, builtCnt=0, completedImages=0;
         // 逐话流式：取本话→落库→释放内存→下一话（URL 已在收集阶段入 IMAGES）
+        // 进度按「全部选中话的总图数」累计推进，不随单话归零
         for(const ci of idxs){
           await legadoWaitIfPaused();
           if(legadoCtrl.aborted) throw new Error('__ABORT__');
           const chapterItems = IMAGES.filter(it=>it.ci===ci);
           if(!chapterItems.length){ continue; }
+          const chapterBase = completedImages;   // 本话之前已完成的总图数
           setLegadoStatus('第 '+(ci+1)+' 话：取图中…');
           await runFetch(chapterItems, bookUrl, (p)=>{
             if(p.phase==='done'){ done++; if(p.it.broken) brokenTotal++; }
-            setLegadoProg(p.started/total, '取图 '+p.started+'/'+total + (brokenTotal ? '（坏图'+brokenTotal+'）' : ''));
+            const cur = chapterBase + p.started;
+            setLegadoProg(cur/total, '取图 '+cur+'/'+total + (brokenTotal ? '（坏图'+brokenTotal+'）' : ''));
             if(p.phase==='done') setLegadoMem();
           }, CONC);
           if(legadoCtrl.aborted) throw new Error('__ABORT__');
+          completedImages += chapterItems.length;   // 本话图数累计入总进度
 
           const pages = chapterItems.filter(it=>it.data).map(it=>it.data);
           const chBroken = chapterItems.some(it=>it.broken);
@@ -2641,6 +2651,7 @@
       });
       $('#btnCancel').addEventListener('click', ()=>{
         legadoCtrl.aborted = true; legadoCtrl.paused = false;
+        legadoActiveCtrl.forEach(c=>{ try{ c.abort(); }catch(_){} });   // 立即中止在飞请求
         $('#btnPause').textContent='暂停';
         setLegadoStatus('正在取消…');
       });
