@@ -2186,7 +2186,9 @@
     // 进度条下方实时显示 JS 堆内存（Chromium 专有 API）；legadoMemStart/Stop 用定时器自动刷新
     function setLegadoMem(){
       const m = (typeof performance!=='undefined' && performance.memory);
-      $('#legadoMem').textContent = m ? ('堆内存 ' + (m.usedJSHeapSize/1048576).toFixed(0) + ' MB / 上限 ' + (m.jsHeapSizeLimit/1048576).toFixed(0) + ' MB') : '';
+      const inMem = IMAGES.reduce((n,it)=>n+(it.data?1:0),0);   // 内存中尚未释放的图片张数
+      const heap = m ? ('堆内存 ' + (m.usedJSHeapSize/1048576).toFixed(0) + ' MB / 上限 ' + (m.jsHeapSizeLimit/1048576).toFixed(0) + ' MB') : '';
+      $('#legadoMem').textContent = (heap ? heap + ' ｜ ' : '') + '内存中图片 ' + inMem + ' 张';
     }
     function legadoMemStart(){ if(legadoMemTimer) return; legadoMemTimer = setInterval(setLegadoMem, 400); }
     function legadoMemStop(){ if(legadoMemTimer){ clearInterval(legadoMemTimer); legadoMemTimer=null; } setLegadoMem(); }
@@ -2471,7 +2473,7 @@
         for(const ci of idxs){
           await legadoWaitIfPaused();
           const ch = CHAPTERS[ci];
-          setLegadoStatus('读取第 '+(ci+1)+' 话：'+(ch.name||ch.title||'')+' …');
+          setLegadoStatus('读取 '+(ci+1)+'.'+(ch.name||ch.title||'')+' …');
           let content;
           try{
             const r = await legadoApi('/getBookContent?url='+encodeURIComponent(bookUrl)+'&index='+ci);
@@ -2499,12 +2501,14 @@
           const chapterItems = IMAGES.filter(it=>it.ci===ci);
           if(!chapterItems.length){ continue; }
           const chapterBase = completedImages;   // 本话之前已完成的总图数
-          setLegadoStatus('第 '+(ci+1)+' 话：取图中…');
+          const ch = CHAPTERS[ci];
+          const chName = ch ? (ch.name||ch.title||'') : '';
+          setLegadoStatus((ci+1)+'.'+chName+' 取图中…（已生成 '+builtCnt+'/'+idxs.length+' 话）');
           await runFetch(chapterItems, bookUrl, (p)=>{
             if(p.phase==='done'){ done++; if(p.it.broken) brokenTotal++; }
             const cur = chapterBase + p.started;
             setLegadoProg(cur/total, '取图 '+cur+'/'+total + (brokenTotal ? '（坏图'+brokenTotal+'）' : ''));
-            if(p.phase==='done') setLegadoMem();
+            if(p.phase==='start' || p.phase==='done') setLegadoMem();
           }, CONC);
           if(legadoCtrl.aborted) throw new Error('__ABORT__');
           completedImages += chapterItems.length;   // 本话图数累计入总进度
@@ -2524,7 +2528,7 @@
             bookName, chapter: ci, broken: chBroken, seq: ++fileSeq, order: fileSeq, thumb
           });
           okChapters++; builtCnt++;
-          setLegadoStatus('第 '+(ci+1)+' 话已存入（'+builtCnt+'/'+idxs.length+'）'+(chBroken ? ' ⚠含坏图' : ''));
+          setLegadoStatus('✅ 已生成 '+builtCnt+'/'+idxs.length+' 话 PDF（'+chName+'）'+(chBroken ? ' ⚠含坏图' : ''));
           setLegadoProg(done/total, '已生成 '+builtCnt+'/'+idxs.length+' 话 PDF');
           renderFiles();   // 文件库实时增长，取消时已完成的话立即可见
           // 无坏图→释放本话 dataUrl+canvas；有坏图→保留供「重下坏图」复用
