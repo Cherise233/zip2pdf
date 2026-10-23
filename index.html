@@ -280,6 +280,7 @@
       <div id="legadoRunCard" style="display:none; margin-top:16px; padding-top:14px; border-top:1px solid #e5e7eb">
         <div class="row" style="margin-bottom:8px">
           <button class="btn small" id="btnBuild" style="flex:1 1 0">🚀 生成 PDF（每话一个）</button>
+          <button class="btn small gray" id="btnDebugMem" style="flex:0 0 auto" title="显示堆内存调试读数">🐞</button>
         </div>
         <div class="row" style="margin-bottom:8px">
           <button class="btn small gray" id="btnPause" style="display:none; flex:1 1 0">暂停</button>
@@ -289,6 +290,7 @@
         <div class="bar-wrap" id="legadoBarWrap" style="display:block">
           <div class="bar"><div class="bar-fill" id="legadoBarFill"></div></div>
           <div id="legadoProgressText"></div>
+          <div id="legadoMem" style="display:none;font-size:11px;color:#888;margin-top:2px"></div>
         </div>
         <div id="legadoStatus">就绪。</div>
       </div>
@@ -610,7 +612,7 @@
             g.fillStyle = '#ffffff';
             g.fillRect(0, 0, w, h);
             g.drawImage(img, 0, 0, w, h);
-            // 统一为手动去糊：上传/生成 PDF 一律保存原图，去糊等用户在 PDF 库点「去糊」按钮
+            // 统一手动去糊：保存原图，去糊推迟到 PDF 库
             const dataUrl = c.toDataURL('image/jpeg', JPEG_QUALITY);
             if (!dataUrl || dataUrl.length < 200) {
               rej(new Error('图片过大，浏览器无法处理'));
@@ -667,10 +669,7 @@
       return out;
     }
 
-    // 增强：亮度 → 灰度混合 → 对比度 → 伽马 → 锐化 → 抖动/黑白
-    // 单遍化：全程只在内存中的一份 ImageData 上顺序处理，最后一次性 putImageData。
-    // （旧实现每步各做一次 get/putImageData，全图内存往返 4 次；在 legado 并发
-    //  取图时是卡顿主因之一。行为等价：Uint8ClampedArray 赋值自带 clamp+round。）
+    // 增强：亮度→灰度混合→对比度→伽马→锐化→抖动/黑白，全程单遍处理 ImageData 后一次性写回
     function dbEnhance(canvas, p) {
       const W = canvas.width, H = canvas.height;
       if (!W || !H) return canvas;
@@ -755,9 +754,7 @@
       return dbEnhance(canvas, p);
     }
 
-    // ---- 设备宽高 / 拉伸铺满 / 设备屏模拟（消除 Kindle「整页」白边）----
-    // 设备目标尺寸统一读取「目标宽度 / 目标高度」两个参数；
-    // #dbDevice 只负责在切换机型时把该机型的宽高填进这两个参数（屏高存在 option 的 data-h 上）。
+    // 设备宽高 / 拉伸铺满 / 设备屏模拟（消除 Kindle「整页」白边）
     function dbGetDeviceSize() {
       const p = dbGetParams();
       if (!p) return { w: 0, h: 0 };                  // 去糊未启用
@@ -827,8 +824,7 @@
       return out;
     }
 
-    // 自动识别留白：在 ~300px 缩略图上扫描非白像素的包围盒，反推四边留白（base 空间 px）。
-    // 用缩略图是为了速度——整分辨率 getImageData 全扫每页要 20~40ms，缩略图只要 1~2ms。
+    // 在 ~300px 缩略图上扫非白像素包围盒，反推四边留白（base 空间 px）；缩略图快、整图太慢
     function dbDetectCrop(canvas) {
       if (!canvas || !canvas.width || !canvas.height) return null;
       const TW = 300;
@@ -864,8 +860,7 @@
       };
     }
 
-    // 把图放到「设备屏幕」画布上：等比缩放居中，留白填白 —— 即模拟 Kindle「整页」看到的样子。
-    // 尺寸已经等于设备宽高（拉伸后）时直接返回，不产生白边。
+    // 等比缩放居中铺到「设备屏幕」画布（白边填白），模拟 Kindle「整页」；尺寸已匹配时直接返回
     function dbScreenOf(canvas, w, h) {
       if (!canvas || !canvas.width || !canvas.height || w <= 0 || h <= 0) return canvas;
       if (canvas.width === w && canvas.height === h) return canvas;
@@ -892,11 +887,7 @@
       return c.toDataURL('image/jpeg', 0.7);
     }
 
-    // PDF 库标题下的去糊控制行：反映「当前有没有去糊」，并驱动按钮态
-    //   未启用       → ⬜ 去糊未启用 + 灰色「去启用」（点击跳去糊设置）
-    //   启用无选中   → ✅ 去糊已启用 + 「去糊」（点击提示先勾选）
-    //   选中含待去糊 → ✅ 去糊已启用 + 「去糊」
-    //   选中全去糊   → ☑️ 已全部去糊 + 灰色禁用「已去糊」
+    // PDF 库去糊控制行：按当前状态切换文案与按钮态（未启用/启用无选/含待去糊/全去糊）
     function updateDbLibBar() {
       const stateEl = document.getElementById('dbLibState');
       const btn = document.getElementById('dbLibBtn');
@@ -1116,9 +1107,7 @@
     });
 
     // ================= 其他文件（.pdf / .epub 等）=================
-    // .pdf  → 本身已是 PDF，直接入库（补一个首图缩略图即可）
-    // .epub → 本质是一个 zip：container.xml → OPF → manifest + spine，按 spine 顺序取图后合成 1 个 PDF
-    // .mobi/.azw3/.azw → 二进制 PDB 容器（且常带 DRM），前端无法可靠解析 → 明确提示
+    // .pdf 直接入库（补缩略图）；.epub 解压按 spine 取图合成 PDF；.mobi 等加密容器不支持
     function zipJoin(base, rel) {
       let p = String(rel || '').split('#')[0].split('?')[0].trim();
       try { p = decodeURIComponent(p); } catch (e) {}
@@ -1151,9 +1140,7 @@
       if (!opffile) throw new Error('EPUB 解析失败：找不到 OPF 文件');
       const opf = await opffile.async('string');
       const base = opfPath;
-      // manifest 必须保留**全量**条目（不限 media-type）：
-      // spine 的 idref 指向的是「章节文档」（application/xhtml+xml），不是图片，
-      // 之前只留图片导致 man.get(sid) 永远查不到，主路径一次都没生效过。
+      // manifest 必须保留全量条目：spine 的 idref 指向章节文档（非图片），只留图片会导致查不到
       const man = new Map();
       for (const tag of (opf.match(/<item\b[^>]*>/gi) || [])) {
         const id = attrOf(tag, 'id');
@@ -1583,10 +1570,7 @@
     }
 
     // ================= 分享到其它 App（LocalSend 等）=================
-    // 说明：Chromium 的 navigator.share 对大 blob 有未公开的内部上限（远低于 500MB，
-    // 机型相关），超限直接抛 NotAllowedError、面板根本不打开——网页改不了这个上限。
-    // 因此：仅当文件较小时尝试系统分享；超限/失败一律走「下载」路线（ZIP 打包或逐个 PDF），
-    // 再到 LocalSend App 里手动发送。
+    // 系统分享对大 blob 有未公开内部上限，超限/失败改走下载（ZIP 或逐个 PDF），再到 LocalSend 发送
     const SHARE_TRY_ONE = 50 * 1024 * 1024;    // 单文件 ≤50MB 才尝试系统分享
     const SHARE_TRY_TOTAL = 80 * 1024 * 1024;  // 合计 ≤80MB 才尝试系统分享
     async function shareFiles(recs) {
@@ -1781,14 +1765,10 @@
     }
 
     // ================= 合并多个 PDF（pdf-lib）=================
-    // 合并结果存入「我的 PDF 库」，可直接 LocalSend 分享；命名与下载时一致（漫画名_范围话.pdf）
-    // 合并前插入「目录」页，顺序与文件库（recs）一致：先 TOC，再按 recs 顺序拼页
-    // 注意：合并只做原样页面拷贝（无损、快）；去糊统一为手动——合并后到 PDF 库点「去糊」按钮。
+    // 合并结果存入「我的 PDF 库」；优先写 /Outlines 书签，失败回退首页目录页；去糊统一为手动
 
-    // 从 PDF 页提取内嵌 JPEG（jsPDF addImage(JPEG) 原样直嵌，字节与源图一致）；找不到返回 null
-    // 注意 1：jsPDF 把全书图片 XObject 放在共享 Resources（/I0、/I1…），每页内容流用
-    //   「/I0 Do」引用自己那张。必须按内容流引用取图，直接取字典第一个会所有页都拿到首页图。
-    // 注意 2：内容流可能是 FlateDecode 压缩的（pdf-lib save 默认压缩），用官方 decodePDFRawStream 解压。
+    // 提取页内嵌 JPEG（原样直嵌，字节一致）。按内容流「/Name Do」引用取图（共享 Resources 不能取首个）；
+    // 内容流可能 FlateDecode 压缩，需 decodePDFRawStream 解压。找不到返回 null
     async function extractJpegFromPage(pdfDoc, page) {
       try {
         const P = PDFLib;
@@ -1841,9 +1821,8 @@
           const img = pickImage(m[1]);
           if (img) return img;
         }
-        // 注意：不要在这里兜底取字典第一个 Image——jsPDF 的 Resources 是全文档共享的，
-        // 纯文字页/目录页的内容流没有 Do 引用，兜底会把首页图错误地提出来。
-        // 解析不到（如内容流损坏）就返回 null，由调用方原样拷贝该页。
+        // 不兜底取字典首个 Image：Resources 全文档共享，纯文字/目录页无 Do 引用会误提首页图；
+        // 解析不到则返回 null，由调用方原样拷贝该页
       } catch (e) { /* 落入调用方兜底 */ }
       return null;
     }
@@ -1878,7 +1857,7 @@
         for (const r of recs) {
           const bytes = await r.blob.arrayBuffer();
           const src = await PDFLib.PDFDocument.load(bytes);
-          // 统一为手动去糊：合并只做原样页面拷贝（无损、快），去糊等用户在 PDF 库点「去糊」按钮
+          // 手动去糊：合并只原样拷贝，去糊推迟到 PDF 库
           const pages = await merged.copyPages(src, src.getPageIndices());
           startIdx.push(acc);
           acc += pages.length;
@@ -1940,8 +1919,7 @@
     }
 
     // ================= PDF 库单条目去糊（点「去糊」按钮触发）=================
-    // ZIP / 图片 / Legado 来源统一：提取每页内嵌 JPEG → 去糊 → 重嵌，覆盖原记录。
-    // 提取失败的页（如目录页 PNG）原样拷贝，保证内容不丢。
+    // 提取每页内嵌 JPEG → 去糊 → 重嵌覆盖原记录；提取失败的页（如目录 PNG）原样拷贝
     async function deblurPdfRecord(rec, onProgress) {
       if (typeof PDFLib === 'undefined') throw new Error('pdf-lib 未加载');
       const bytes = await rec.blob.arrayBuffer();
@@ -1983,10 +1961,8 @@
 
 
     // ================= PDF 书签 / 大纲（/Outlines）=================
-    // Kindle、KOReader 及多数阅读器侧边的「目录」读的是 PDF 内部的 /Outlines 树，
-    // 与首页那张画出来的目录页是两回事。pdf-lib 没有高级 API，这里手动构造：
-    //   Catalog /Outlines → Outlines 根 → 各条目（Title / Parent / Prev / Next / Dest）
-    // 中文标题必须用 PDFHexString（UTF-16BE），否则会乱码。
+    // 手动构造 /Outlines 树（pdf-lib 无高级 API）：Kindle/KOReader 侧边目录读它，与首页目录页无关；
+    // 中文标题须用 PDFHexString（UTF-16BE）否则乱码
     function addPdfOutline(doc, entries) {
       const P = PDFLib;
       if (!P || !P.PDFName || !P.PDFHexString) return false;
@@ -2024,9 +2000,7 @@
       return true;
     }
 
-    // 把源 PDF 的 /Outlines 书签（目录）整棵子树复制到目标 PDF，并把每个书签指向的页码
-    // 重新映射到目标文档里对应的页。目标页顺序必须与源一致（去糊：输出页索引 == 源页索引）。
-    // 支持任意层级嵌套、中文标题（PDFHexString UTF-16BE）、Dest 数组与 GoTo 动作。
+    // 复制源 /Outlines 子树到目标并按页序重映射（去糊后页序一致）；支持嵌套、中文、Dest/GoTo
     function copyPdfOutline(srcDoc, dstDoc) {
       const P = PDFLib;
       if (!P || !P.PDFName || !P.PDFHexString || !P.PDFNumber) return false;
@@ -2196,15 +2170,13 @@
       return { bytes: new Uint8Array(buf), W, H };
     }
 
-    // ============================================================
     // ================= Legado 直连转 PDF =================
-    // ============================================================
     let BOOKS = [], CHAPTERS = [], SELECTED = new Set(), IMAGES = [];
+    let legadoDebug = false;   // 🐞 调试开关：开启后进度条下方显示堆内存读数
     let chapterDisplayOrder = 'asc';   // 章节列表显示顺序：asc 正序 / desc 倒序
     let dragFileId = null;             // 文件库拖拽排序：当前拖动的文件 id
     let dropTarget = null;             // 文件库拖拽落点：{ id, before }，供 drop 时定位插入位置
-    // 取图并发：去糊在同步主线程做重计算，并发过高会占满主线程导致界面无响应
-    // （进度停摆、取消点击排队）。默认 3，需要更快可在「并发线数」输入框调高。
+    // 并发取图（去糊占主线程，并发过高会卡 UI）。默认 3，可在「并发线数」调高
     const CONCURRENCY = 3;
     const RETRIES = 2;
     const PLACEHOLDER_BYTES = 50000;
@@ -2212,6 +2184,12 @@
 
     const $ = s => document.querySelector(s);
     function setLegadoStatus(t){ $('#legadoStatus').textContent = t; }
+    // 调试读数：仅在 legadoDebug 开启时显示堆内存（Chromium 专有 API）
+    function setLegadoMem(){
+      if(!legadoDebug) return;
+      const m = (typeof performance!=='undefined' && performance.memory);
+      $('#legadoMem').textContent = m ? ('堆内存 ' + (m.usedJSHeapSize/1048576).toFixed(0) + ' MB / 上限 ' + (m.jsHeapSizeLimit/1048576).toFixed(0) + ' MB') : '';
+    }
     function setLegadoProg(p, label){
       document.getElementById('legadoBarWrap').style.display = 'block';
       document.getElementById('legadoBarFill').style.width = Math.max(0,Math.min(100,p*100)).toFixed(1) + '%';
@@ -2358,8 +2336,7 @@
           ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h);
           ctx.drawImage(img,0,0);
           URL.revokeObjectURL(url);
-          // 去糊不在此处做：下载/取图阶段保持原图入文件库，去糊推迟到「文件库合并 → 放入 PDF 库」时
-          // （在并发取图热路径做重计算会占满主线程，导致进度停摆、取消无响应）
+          // 不去糊：保持原图入文件库，去糊推迟到「文件库合并 → 放入 PDF 库」（并发热路径做重计算会卡 UI）
           let variance = 999;
           try{
             const step = Math.max(1, Math.floor((w*h)/2000));
@@ -2475,6 +2452,7 @@
       IMAGES = [];
       // 进度条恢复开始状态
       setLegadoProg(0, '准备中…');
+      $('#legadoMem').textContent='';   // 清空上次的调试内存读数
       try{
         setLegadoStatus('收集章节图片列表…');
         let total=0, readCnt=0;
@@ -2498,21 +2476,29 @@
         }
         if(!total){ setLegadoStatus('没有可生成的图片。'); $('#btnBuild').disabled=false; legadoHideCtrl(); return; }
 
-        setLegadoStatus('开始取图，共 '+total+' 张（并发 '+CONC+'）…');
-        let done=0, broken=0;
-        await runFetch(IMAGES, bookUrl, (it)=>{
-          done++; if(it.broken) broken++;
-          setLegadoProg(done/total, '取图 '+done+'/'+total);
-          if(it.broken) setLegadoStatus('取图中 '+done+'/'+total+' … 已发现坏图 '+broken+' 张');
-        }, CONC);
-
-        // 逐话生成 PDF 并存入文件库
-        let okChapters=0, builtCnt=0;
+        setLegadoStatus('开始逐话取图（并发 '+CONC+'，每话存库后释放内存）…');
+        setLegadoMem();   // 基线堆内存
+        let done=0, brokenTotal=0, okChapters=0, builtCnt=0;
+        // 逐话流式：取本话→落库→释放内存→下一话（URL 已在收集阶段入 IMAGES）
         for(const ci of idxs){
           await legadoWaitIfPaused();
-          const pages = IMAGES.filter(it=>it.ci===ci && it.data).map(it=>it.data);
-          const chBroken = IMAGES.some(it=>it.ci===ci && it.broken);
-          if(!pages.length){ continue; }
+          if(legadoCtrl.aborted) throw new Error('__ABORT__');
+          const chapterItems = IMAGES.filter(it=>it.ci===ci);
+          if(!chapterItems.length){ continue; }
+          setLegadoStatus('第 '+(ci+1)+' 话：取图中…');
+          await runFetch(chapterItems, bookUrl, (it)=>{
+            done++; if(it.broken) brokenTotal++;
+            setLegadoProg(done/total, '取图 '+done+'/'+total + (brokenTotal ? '（坏图'+brokenTotal+'）' : ''));
+            setLegadoMem();   // 取图过程中实时显示堆内存攀升
+          }, CONC);
+          if(legadoCtrl.aborted) throw new Error('__ABORT__');
+
+          const pages = chapterItems.filter(it=>it.data).map(it=>it.data);
+          const chBroken = chapterItems.some(it=>it.broken);
+          if(!pages.length){
+            setLegadoStatus('第 '+(ci+1)+' 话无有效图，跳过。');
+            continue;
+          }
           const blob = buildPdfBlob(pages);
           const name = makeFname(bookName, [ci]);
           const thumb = pages[0] && pages[0].canvas ? dbMakeThumb(pages[0].canvas) : null;
@@ -2522,9 +2508,13 @@
             bookName, chapter: ci, broken: chBroken, seq: ++fileSeq, order: fileSeq, thumb
           });
           okChapters++; builtCnt++;
+          setLegadoStatus('第 '+(ci+1)+' 话已存入（'+builtCnt+'/'+idxs.length+'）'+(chBroken ? ' ⚠含坏图' : ''));
           setLegadoProg(done/total, '已生成 '+builtCnt+'/'+idxs.length+' 话 PDF');
+          renderFiles();   // 文件库实时增长，取消时已完成的话立即可见
+          // 无坏图→释放本话 dataUrl+canvas；有坏图→保留供「重下坏图」复用
+          if(!chBroken){ chapterItems.forEach(it=>{ it.data = null; }); }
+          setLegadoMem();   // 本话释放后，应看到堆内存明显回落
         }
-        renderFiles();
 
         if(!okChapters){
           const lastErr = (IMAGES.find(i=>i.err && i.err!=='坏图/占位图')||{}).err || '占位图';
@@ -2532,24 +2522,22 @@
           $('#btnBuild').disabled=false; legadoHideCtrl(); return;
         }
         setLegadoStatus('✅ 完成！已存入文件库 '+okChapters+' 个 PDF（每话一个）'
-          + (broken ? '，坏图 '+broken+' 张（点下面按钮可只重下坏图）' : '')
+          + (brokenTotal ? '，坏图 '+brokenTotal+' 张（点下面按钮可只重下坏图）' : '')
           + '。\n到下方「📁 文件库」可多选合并 / 下载。');
         // 生成成功后取消章节列表里的勾选
         document.querySelectorAll('#legadoChList input').forEach(cb => { cb.checked = false; });
         SELECTED.clear();
-        if(broken){
+        if(brokenTotal){
           $('#btnReDL').style.display='';
-          $('#btnReDL').textContent='🔄 重新下载坏图 ('+broken+')';
+          $('#btnReDL').textContent='🔄 重新下载坏图 ('+brokenTotal+')';
         } else {
-          // 内存优化：本次生成无坏图（不会显示「重下坏图」按钮），取图数据已无用，
-          // 立即释放 IMAGES（每页的全分辨率 canvas + dataUrl，几百页可达数 GB）。
-          // 有坏图时须保留 IMAGES 供 legadoReDownload 重建受影响章节，故仅无坏图时清。
-          IMAGES = [];
+          IMAGES = [];   // 无坏图时一次性释放全部取图数据
         }
       }catch(e){
         if(e && e.message==='__ABORT__'){
-          // 取消：清掉已取的图片数据（释放内存），进度条重置隐藏
+          // 取消：释放全部取图数据（含 URL），进度条隐藏
           IMAGES = [];
+          renderFiles();   // 刷新文件库，让已存的话立即可见
           document.getElementById('legadoBarWrap').style.display='none';
           document.getElementById('legadoProgressText').textContent='';
           setLegadoStatus('已取消。已生成完成的 PDF 保留在文件库，未完成的不再继续。');
@@ -2630,6 +2618,13 @@
         setLegadoStatus('已选第 '+Math.min(a,b)+'~'+Math.max(a,b)+' 话。');
       });
       $('#btnBuild').addEventListener('click', legadoBuild);
+      $('#btnDebugMem').addEventListener('click', ()=>{
+        legadoDebug = !legadoDebug;
+        $('#legadoMem').style.display = legadoDebug ? '' : 'none';
+        $('#btnDebugMem').classList.toggle('gray', !legadoDebug);
+        $('#legadoMem').textContent = '';
+        if(legadoDebug) setLegadoMem();
+      });
       $('#btnPause').addEventListener('click', ()=>{
         legadoCtrl.paused = !legadoCtrl.paused;
         if(legadoCtrl.paused){
@@ -2664,8 +2659,7 @@
       });
     }
 
-    // ================= 初始化 =================
-    // ================= 顶部标签页切换 =================
+    // ================= 初始化 / 顶部标签页切换 =================
     function initTabs() {
       const mainBtn = document.getElementById('tabMainBtn');
       const deblurBtn = document.getElementById('tabDeblurBtn');
@@ -2818,7 +2812,6 @@
       if (stretchChk) stretchChk.addEventListener('change', schedulePreview);
 
       // ---------- 裁边 ----------
-      // 四组控件复用 .krow 结构，顺序与「目标宽度」等参数行一致：输入框在前、拉条在后
       const CROP_KEYS = ['top', 'bottom', 'left', 'right'];
       const CROP_LABEL = { top: '上', bottom: '下', left: '左', right: '右' };
       const cropCtl = {};
@@ -2956,10 +2949,7 @@
         g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
         g.drawImage(srcCanvas, 0, 0, cv.width, cv.height);
       }
-      // 最近一次渲染的全尺寸 canvas（原图 / 去糊后），供点击放大时取高清图
-      // （预览画布被缩到 ~220px，直接 toDataURL 会得到模糊小图）
-      // dbLastProcScreen 是「去糊后 + 设备屏模拟」的全尺寸画布，仅用于预览/放大；
-      // 导出与真实去糊用的是 dbLastProcC（不含模拟白边）。
+      // 全尺寸 canvas 缓存（预览被缩到 ~220px，放大须用原尺寸）；dbLastProcScreen 含模拟白边仅用于预览
       let dbLastOrigC = null, dbLastProcC = null, dbLastProcScreen = null;
       function renderPreview() {
         if (!srcImg) return;
@@ -3006,10 +2996,7 @@
         im.src = url; e.target.value = '';
       });
 
-      // 「测试 / 下载测试 PDF」双态按钮：
-      //   初始       → 「测试」，点击调起选图
-      //   上传图片后 → 「下载测试 PDF」，导出两页 PDF（第 1 页原图、第 2 页去糊后）供传到设备实测
-      //   下载完成   → 复原为「测试」，可继续上传新的测试图
+      // 「测试 / 下载测试 PDF」双态按钮：初始选图，上传后导出两页 PDF（原图+去糊后）供设备实测
       const pickBtn = document.getElementById('dbPick');
       function openPicker() { if (imgInput) imgInput.click(); }
       function setPickMode(toDownload) {
@@ -3027,8 +3014,7 @@
           await ensureLibs();
           if (typeof PDFLib === 'undefined') { statusMsg('⚠️ pdf-lib 未加载，无法生成测试 PDF'); return; }
           const doc = await PDFLib.PDFDocument.create();
-          // 两页：第 1 页原图（不裁边、不拉伸，保留原始比例）、第 2 页去糊后
-          // （dbLastProcC 已含裁边 + 拉伸），传到设备上翻页即可对比
+          // 两页对比：第 1 页原图、第 2 页去糊后（含裁边+拉伸），传设备翻页即可看效果
           for (const cv of [origC, procC]) {
             const img = await doc.embedJpg(cv.toDataURL('image/jpeg', 0.92));
             const page = doc.addPage([cv.width, cv.height]);
@@ -3113,8 +3099,7 @@
           else { factoryReset(); statusMsg('尚未保存预设，已恢复出厂默认'); }
         } catch (e) { factoryReset(); statusMsg('预设读取失败，已恢复出厂默认'); }
       });
-      // 供 PDF 库单选时读取该文件并抽图到预览（ZIP / 图片 / Legado 来源统一走此路线）。
-      // 保留 pdf-lib 文档引用，配合页码输入框可翻页预览任意页。
+      // PDF 库单选时读文件抽图到预览（ZIP/图片/Legado 统一）；保留 pdf-lib 引用可翻页
       let dbCurPdfDoc = null, dbCurPageCount = 0, dbCurRecName = '';
       function updateDbPageInput(pi) {
         const inp = document.getElementById('dbPageInput');
@@ -3212,9 +3197,7 @@
         dbLightbox.style.display = 'none';
       });
 
-      // ---------- 裁边：放大图上的拖拽裁剪框（手机相册式）----------
-      // 编辑对象是 base 画布（重采样+去糊、未裁边），裁边值本来就定义在这个坐标系里，
-      // 所以画布像素与裁边值是 1:1 换算，不用考虑设备屏留白干扰。
+      // 裁边：放大图上的拖拽裁剪框（手机相册式）。编辑 base 画布，与裁边值 1:1 换算
       const cropCv = document.getElementById('dbCropCanvas');
       const cropBar = document.getElementById('dbCropBar');
       let cropEditing = false, cropDrag = null, cropSnapshot = null;
