@@ -2140,9 +2140,12 @@
 
     function refKey(r) { return r.objectNumber + ':' + r.generationNumber; }
 
-    // 目录条目标签：有话号 → 第X话；否则用文件名（去 .pdf）
+    // 目录条目标签：带章节号 → 「章节列表序号.章节名」（无章节名时回退第X话）；否则用文件名（去 .pdf）
     function tocLabel(r) {
-      if (typeof r.chapter === 'number' && r.chapter >= 0) return '第' + (r.chapter + 1) + '话';
+      if (typeof r.chapter === 'number' && r.chapter >= 0) {
+        if (r.chName) return (r.chapter + 1) + '.' + r.chName;
+        return '第' + (r.chapter + 1) + '话';
+      }
       return (r.name || '未命名').replace(/\.pdf$/i, '');
     }
     // 用 canvas 画一张「目录」页（支持中文），转 PNG 供 pdf-lib 嵌入
@@ -2525,7 +2528,7 @@
           await dbPutFile({
             id: 'f-' + Date.now() + '-' + ci, name, size: blob.size,
             createdAt: new Date().toLocaleString('zh-CN'), blob, kind: 'legado',
-            bookName, chapter: ci, broken: chBroken, seq: ++fileSeq, order: fileSeq, thumb
+            bookName, chapter: ci, chName, broken: chBroken, seq: ++fileSeq, order: fileSeq, thumb
           });
           okChapters++; builtCnt++;
           setLegadoStatus('✅ 已生成 '+builtCnt+'/'+idxs.length+' 话 PDF（'+chName+'）'+(chBroken ? ' ⚠含坏图' : ''));
