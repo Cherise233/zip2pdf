@@ -280,7 +280,6 @@
       <div id="legadoRunCard" style="display:none; margin-top:16px; padding-top:14px; border-top:1px solid #e5e7eb">
         <div class="row" style="margin-bottom:8px">
           <button class="btn small" id="btnBuild" style="flex:1 1 0">🚀 生成 PDF（每话一个）</button>
-          <button class="btn small gray" id="btnDebugMem" style="flex:0 0 auto" title="显示堆内存调试读数">🐞</button>
         </div>
         <div class="row" style="margin-bottom:8px">
           <button class="btn small gray" id="btnPause" style="display:none; flex:1 1 0">暂停</button>
@@ -290,8 +289,8 @@
         <div class="bar-wrap" id="legadoBarWrap" style="display:block">
           <div class="bar"><div class="bar-fill" id="legadoBarFill"></div></div>
           <div id="legadoProgressText"></div>
-          <div id="legadoMem" style="display:none;font-size:11px;color:#888;margin-top:2px"></div>
         </div>
+        <div id="legadoMem" style="font-size:11px;color:#888;margin-top:2px"></div>
         <div id="legadoStatus">就绪。</div>
       </div>
     </div>
@@ -2172,7 +2171,6 @@
 
     // ================= Legado 直连转 PDF =================
     let BOOKS = [], CHAPTERS = [], SELECTED = new Set(), IMAGES = [];
-    let legadoDebug = false;   // 🐞 调试开关：开启后进度条下方显示堆内存读数
     let chapterDisplayOrder = 'asc';   // 章节列表显示顺序：asc 正序 / desc 倒序
     let dragFileId = null;             // 文件库拖拽排序：当前拖动的文件 id
     let dropTarget = null;             // 文件库拖拽落点：{ id, before }，供 drop 时定位插入位置
@@ -2181,15 +2179,17 @@
     const RETRIES = 2;
     const PLACEHOLDER_BYTES = 50000;
     const VAR_THRESHOLD = 4;
+    const LEGADO_REDL_TIMEOUT = 10000;  // 重下坏图单图超时：坏图多为死源，缩短空等
 
     const $ = s => document.querySelector(s);
     function setLegadoStatus(t){ $('#legadoStatus').textContent = t; }
-    // 调试读数：仅在 legadoDebug 开启时显示堆内存（Chromium 专有 API）
+    // 进度条下方实时显示 JS 堆内存（Chromium 专有 API）；legadoMemStart/Stop 用定时器自动刷新
     function setLegadoMem(){
-      if(!legadoDebug) return;
       const m = (typeof performance!=='undefined' && performance.memory);
       $('#legadoMem').textContent = m ? ('堆内存 ' + (m.usedJSHeapSize/1048576).toFixed(0) + ' MB / 上限 ' + (m.jsHeapSizeLimit/1048576).toFixed(0) + ' MB') : '';
     }
+    function legadoMemStart(){ if(legadoMemTimer) return; legadoMemTimer = setInterval(setLegadoMem, 400); }
+    function legadoMemStop(){ if(legadoMemTimer){ clearInterval(legadoMemTimer); legadoMemTimer=null; } setLegadoMem(); }
     function setLegadoProg(p, label){
       document.getElementById('legadoBarWrap').style.display = 'block';
       document.getElementById('legadoBarFill').style.width = Math.max(0,Math.min(100,p*100)).toFixed(1) + '%';
@@ -2197,6 +2197,7 @@
     }
 
     // ============ 暂停 / 取消 控制 ============
+    let legadoMemTimer = null;   // 堆内存读数定时器（legado 操作期间自动刷新）
     const legadoCtrl = { aborted:false, paused:false, lastStatus:null };
     function legadoHideCtrl(){
       $('#btnPause').style.display='none'; $('#btnCancel').style.display='none';
@@ -2217,10 +2218,10 @@
     }
 
     const LEGADO_TIMEOUT = 20000; // 单请求超时：避免某话卡住时一直停在「准备中」
-    async function legadoApi(path){
+    async function legadoApi(path, timeout){
       const base = $('#legadoBase').value.trim().replace(/\/+$/,'');
       const ctrl = new AbortController();
-      const timer = setTimeout(()=>ctrl.abort(), LEGADO_TIMEOUT);
+      const timer = setTimeout(()=>ctrl.abort(), timeout || LEGADO_TIMEOUT);
       let res;
       try{
         res = await fetch(base + path, {mode:'cors', cache:'no-store', signal: ctrl.signal});
@@ -2366,12 +2367,12 @@
 
     // /image 接口：url=bookUrl 查书+书源；path=完整 src（含 ,{headers} JSON）解析 Referer；width=解码宽度
     // 下载失败 legado 不报错，返回 errorBitmap 占位图（HTTP 200），用字节/方差识别
-    async function downloadToJpeg(bookUrl, fullSrc){
+    async function downloadToJpeg(bookUrl, fullSrc, timeout){
       const u = '/image?url='+encodeURIComponent(bookUrl)
               +'&path='+encodeURIComponent(fullSrc)
               +'&width=1440';
       let res;
-      try{ res = await legadoApi(u); }
+      try{ res = await legadoApi(u, timeout); }
       catch(e){ throw new Error('请求失败: '+e.message); }
       if(!res.ok){
         const t = await res.text().catch(()=> '(无正文)');
@@ -2386,11 +2387,13 @@
       return await blobToJpeg(blob);
     }
 
-    async function fetchItem(bookUrl, it){
+    async function fetchItem(bookUrl, it, opts){
+      const retries = (opts && opts.retries != null) ? opts.retries : RETRIES;
+      const timeout = (opts && opts.timeout != null) ? opts.timeout : LEGADO_TIMEOUT;
       let lastErr='';
-      for(let a=0; a<RETRIES; a++){
+      for(let a=0; a<retries; a++){
         try{
-          const jpg = await downloadToJpeg(bookUrl, it.src);
+          const jpg = await downloadToJpeg(bookUrl, it.src, timeout);
           const broken = jpg.size < PLACEHOLDER_BYTES || jpg.variance < VAR_THRESHOLD;
           it.data = broken ? null : jpg;
           it.broken = broken;
@@ -2404,13 +2407,16 @@
       it.data=null; it.broken=true; it.err=lastErr;
     }
 
-    async function runFetch(items, bookUrl, onOne, limit){
+    // onProg({started, done, total, it, phase:'start'|'done'})：用 started 推进进度，慢图期间进度条仍活动
+    async function runFetch(items, bookUrl, onProg, limit, fetchOpts){
+      let started=0, done=0;
       await mapLimit(items, limit || CONCURRENCY, async (it)=>{
         await legadoWaitIfPaused();                 // 取消时在此抛出 __ABORT__
         if (legadoCtrl.aborted) return;             // 取消后不再取图 / 刷新进度
-        await fetchItem(bookUrl, it);
+        started++; onProg({started, done, total:items.length, it, phase:'start'});
+        await fetchItem(bookUrl, it, fetchOpts);
         if (legadoCtrl.aborted) return;             // 取消后不再更新进度条
-        onOne(it);
+        done++; onProg({started, done, total:items.length, it, phase:'done'});
       });
     }
 
@@ -2477,7 +2483,7 @@
         if(!total){ setLegadoStatus('没有可生成的图片。'); $('#btnBuild').disabled=false; legadoHideCtrl(); return; }
 
         setLegadoStatus('开始逐话取图（并发 '+CONC+'，每话存库后释放内存）…');
-        setLegadoMem();   // 基线堆内存
+        legadoMemStart();   // 启动堆内存自动刷新
         let done=0, brokenTotal=0, okChapters=0, builtCnt=0;
         // 逐话流式：取本话→落库→释放内存→下一话（URL 已在收集阶段入 IMAGES）
         for(const ci of idxs){
@@ -2486,10 +2492,10 @@
           const chapterItems = IMAGES.filter(it=>it.ci===ci);
           if(!chapterItems.length){ continue; }
           setLegadoStatus('第 '+(ci+1)+' 话：取图中…');
-          await runFetch(chapterItems, bookUrl, (it)=>{
-            done++; if(it.broken) brokenTotal++;
-            setLegadoProg(done/total, '取图 '+done+'/'+total + (brokenTotal ? '（坏图'+brokenTotal+'）' : ''));
-            setLegadoMem();   // 取图过程中实时显示堆内存攀升
+          await runFetch(chapterItems, bookUrl, (p)=>{
+            if(p.phase==='done'){ done++; if(p.it.broken) brokenTotal++; }
+            setLegadoProg(p.started/total, '取图 '+p.started+'/'+total + (brokenTotal ? '（坏图'+brokenTotal+'）' : ''));
+            if(p.phase==='done') setLegadoMem();
           }, CONC);
           if(legadoCtrl.aborted) throw new Error('__ABORT__');
 
@@ -2545,7 +2551,7 @@
           setLegadoStatus('生成出错：'+e.message);
         }
       }
-      finally{ $('#btnBuild').disabled = false; legadoHideCtrl(); }
+      finally{ legadoMemStop(); $('#btnBuild').disabled = false; legadoHideCtrl(); }
     }
 
     // 只重下坏图：再请求一次（legado 有缓存，常在第二次成功），重建受影响的话并覆盖文件库记录
@@ -2557,13 +2563,15 @@
       const b = BOOKS[+$('#legadoBookSel').value];
       const bookUrl = b.bookUrl || b.url;
       const bookName = (b.name || b.bookName || 'legado') + '';
+      const CONC = Math.max(1, Math.min(32, parseInt($('#concInput') && $('#concInput').value, 10) || CONCURRENCY));
       try{
-        setLegadoStatus('重新下载坏图，共 '+bad.length+' 张…');
+        setLegadoStatus('重新下载坏图，共 '+bad.length+' 张（并发 '+CONC+'，单图超时 10s、仅重试 1 次）…');
+        legadoMemStart();
         let done=0, still=0;
-        await runFetch(bad, bookUrl, (it)=>{
-          done++; if(it.broken) still++;
-          setLegadoProg(done/bad.length);
-        });
+        await runFetch(bad, bookUrl, (p)=>{
+          if(p.phase==='done'){ done++; if(p.it.broken) still++; setLegadoStatus('重下坏图 '+done+'/'+bad.length + (still ? '（仍坏'+still+'）' : '')); }
+          setLegadoProg(p.started/bad.length, '重下坏图 '+p.started+'/'+bad.length + (still ? '（仍坏'+still+'）' : ''));
+        }, CONC, { retries:1, timeout: LEGADO_REDL_TIMEOUT });
         const affected = [...new Set(bad.map(it=>it.ci))];
         const files = await dbAllFiles();
         for(const ci of affected){
@@ -2586,7 +2594,7 @@
           IMAGES = [];
         }
       }catch(e){ setLegadoStatus('重下出错：'+e.message); }
-      finally{ $('#btnReDL').disabled=false; $('#btnBuild').disabled=false; }
+      finally{ legadoMemStop(); $('#btnReDL').disabled=false; $('#btnBuild').disabled=false; }
     }
 
     // ================= Legado 事件绑定 =================
@@ -2618,13 +2626,6 @@
         setLegadoStatus('已选第 '+Math.min(a,b)+'~'+Math.max(a,b)+' 话。');
       });
       $('#btnBuild').addEventListener('click', legadoBuild);
-      $('#btnDebugMem').addEventListener('click', ()=>{
-        legadoDebug = !legadoDebug;
-        $('#legadoMem').style.display = legadoDebug ? '' : 'none';
-        $('#btnDebugMem').classList.toggle('gray', !legadoDebug);
-        $('#legadoMem').textContent = '';
-        if(legadoDebug) setLegadoMem();
-      });
       $('#btnPause').addEventListener('click', ()=>{
         legadoCtrl.paused = !legadoCtrl.paused;
         if(legadoCtrl.paused){
