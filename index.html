@@ -2605,12 +2605,16 @@
       const bookName = (b.name || b.bookName || 'legado') + '';
       const CONC = Math.max(1, Math.min(32, parseInt($('#concInput') && $('#concInput').value, 10) || CONCURRENCY));
       try{
-        setLegadoStatus('重新下载坏图，共 '+bad.length+' 张（并发 '+CONC+'，单图超时 10s、仅重试 1 次）…');
+        // 总提醒固定为一句；细进度走进度条文字（与「取图 11/207」同位置），格式「坏图重下1/4」
+        setLegadoStatus('正在重新下载坏图…');
+        setLegadoProg(0, '坏图重下0/'+bad.length);
         legadoMemStart();
         let done=0, still=0;
         await runFetch(bad, bookUrl, (p)=>{
-          if(p.phase==='done'){ done++; if(p.it.broken) still++; setLegadoStatus('重下坏图 '+done+'/'+bad.length + (still ? '（仍坏'+still+'）' : '')); }
-          setLegadoProg(p.started/bad.length, '重下坏图 '+p.started+'/'+bad.length + (still ? '（仍坏'+still+'）' : ''));
+          // 仅按完成数推进：start 阶段因并发会提前跑满，导致进度条瞬跳、不反映真实进度
+          if(p.phase!=='done') return;
+          done++; if(p.it.broken) still++;
+          setLegadoProg(done/bad.length, '坏图重下'+done+'/'+bad.length + (still ? '（仍坏'+still+'）' : ''));
         }, CONC, { retries:1, timeout: LEGADO_REDL_TIMEOUT });
         const affected = [...new Set(bad.map(it=>it.ci))];
         const files = await dbAllFiles();
