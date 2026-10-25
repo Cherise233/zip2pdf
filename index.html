@@ -2180,14 +2180,8 @@
     // 并发取图（去糊占主线程，并发过高会卡 UI）。默认 3，可在「并发线数」调高
     const CONCURRENCY = 3;
     const RETRIES = 2;
-    // ===== 坏图判定阈值 =====
-    // legado /image 下载失败时不报错，返回 errorBitmap 占位图（已核对 legado 源码 + 实测资源：
-    // 512×512、约 6.9KB、近黑底小图标；web 端原样以 PNG q=100 下发、不缩放）。真实漫画页解码到
-    // ~1440 宽后以 PNG 下发几乎必然 ≥150KB，与占位图差 20 倍以上——因此「文件体积过小」是最
-    // 可靠的首要判据；方差/尺寸只是兜底。
-    const PLACEHOLDER_BYTES = 50000;  // ① 字节阈值（占位图约 7KB，真实页通常 >150KB，留足余量）
-    const VAR_THRESHOLD = 4;          // ② 全图灰度方差：近乎纯色=占位图/灰块
-    const MIN_PAGE_PX = 200;          // ③ 短边下限：低于此视为图标级解码（如被放大的占位图/细长条）
+    const PLACEHOLDER_BYTES = 50000;
+    const VAR_THRESHOLD = 4;
     const LEGADO_REDL_TIMEOUT = 10000;  // 重下坏图单图超时：坏图多为死源，缩短空等
 
     const $ = s => document.querySelector(s);
@@ -2325,37 +2319,20 @@
       }
     }
 
-    // 从章节正文提取图片（保留完整 src：URL + ,{"headers":{...}} JSON 后缀，legado 解析 Referer 用）。
-    // 两个坑都要避开：① src 不一定是最后一个属性（<img src="u" alt="x">），老正会把后面的
-    // 属性吞进 URL → 请求必失败且重下也救不回；② JSON 后缀自带引号（src="u,{"headers":{}}"），
-    // 不能按第一个引号截断。故按整个标签解析，src 值锚定到「引号后紧跟 > 或下一个属性名=」。
+    // 从章节正文提取图片（保留完整 src：URL + ,{"headers":{...}} JSON 后缀，legado 解析 Referer 用）
     function extractImages(text){
       let html = text;
       try{ const o = JSON.parse(text); if(o && typeof o.data==='string') html = o.data; }catch(_){}
       html = html.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"')
                  .replace(/&#39;/g,"'").replace(/&amp;/g,'&');
       const imgs = [];
-      const tagRe = /<img\b[^>]*>/gi; let t;
-      while((t = tagRe.exec(html))){
-        const tag = t[0];
-        const m = /\bsrc\s*=\s*(?:"([\s\S]*?)"\s*(?:>|[a-zA-Z-]+\s*=)|'([^']*)'|([^\s>]+))/i.exec(tag);
-        if(!m) continue;
-        const full = m[1] != null ? m[1] : (m[2] != null ? m[2] : m[3]);
-        if(!full) continue;
+      const re = /\ssrc\s*=\s*"([\s\S]*?)"\s*>/gi; let m;
+      while((m = re.exec(html))){
+        const full = m[1];
         const comma = full.indexOf(',');
         imgs.push({ url: comma>=0 ? full.slice(0,comma) : full, src: full });
       }
       return imgs;
-    }
-
-    // 击穿 legado 图片缓存的 src 变形：只在 URL 部分尾部追加 fragment。
-    // legado 的图片缓存文件名 = MD5(src)，且 BookHelp.saveImage 在「文件已存在」时直接返回
-    // 不重下（哪怕原文件是坏数据）——首次失败写进的坏文件会让重下永远拿到同一张占位图。
-    // fragment 不参与实际 HTTP 请求（客户端外的东西不会发给服务器），但 MD5 变了→强制重下。
-    function bustSrc(src, n){
-      const comma = src.indexOf(',');
-      if(comma < 0) return src + '#__rd' + n;
-      return src.slice(0, comma) + '#__rd' + n + src.slice(comma);
     }
 
     function blobToJpeg(blob){
@@ -2420,36 +2397,22 @@
       return await blobToJpeg(blob);
     }
 
-    // 坏图判定：返回原因串（null=正常图）。首要信号是「文件体积过小」——legado 占位图约 7KB，
-    // 真实漫画页 PNG 通常 >150KB，差 20 倍以上；方差/尺寸为兜底信号。
-    function judgeBroken(jpg){
-      if(jpg.size < PLACEHOLDER_BYTES) return '体积过小';               // ① 占位图/半截图/小图（首要）
-      if(jpg.variance < VAR_THRESHOLD) return '近乎纯色';               // ② 纯色/灰块
-      if(jpg.w < MIN_PAGE_PX || jpg.h < MIN_PAGE_PX) return '尺寸过小'; // ③ 图标级解码（放大的占位图）
-      return null;
-    }
-
     async function fetchItem(bookUrl, it, opts){
       const retries = (opts && opts.retries != null) ? opts.retries : RETRIES;
       const timeout = (opts && opts.timeout != null) ? opts.timeout : LEGADO_TIMEOUT;
-      // 重下时击穿 legado 图片缓存（bust=true）：每次重下换一个新 fragment，迫使 legado
-      // 重新下载，而不是把首次失败写下的坏文件/缓存占位图再吐一遍。
-      const bust = (opts && opts.bust) ? (it.rdSeq = (it.rdSeq || 0) + 1) : 0;
-      const useSrc = bust ? bustSrc(it.src, bust) : it.src;
       let lastErr='';
       for(let a=0; a<retries; a++){
         if(legadoCtrl.aborted) break;   // 取消后不再重试
         try{
-          const jpg = await downloadToJpeg(bookUrl, useSrc, timeout);
-          const why = judgeBroken(jpg);
-          it.data = why ? null : jpg;
-          it.broken = !!why;
-          it.err  = why ? '坏图/占位图' : '';
-          it.badWhy = why || '';        // 判坏原因，供重下完成时汇总汇报
+          const jpg = await downloadToJpeg(bookUrl, it.src, timeout);
+          const broken = jpg.size < PLACEHOLDER_BYTES || jpg.variance < VAR_THRESHOLD;
+          it.data = broken ? null : jpg;
+          it.broken = broken;
+          it.err  = broken ? '坏图/占位图' : '';
           return;
         }catch(e){
           lastErr = e.message;
-          if(a < retries-1) continue;   // 网络错误才重试；占位图不重试（浪费）
+          if(a < RETRIES-1) continue;
         }
       }
       it.data=null; it.broken=true; it.err=lastErr;
@@ -2608,99 +2571,47 @@
       finally{ legadoMemStop(); $('#btnBuild').disabled = false; legadoHideCtrl(); }
     }
 
-    // 只重下坏图：再请求一次（legado 有缓存，常在第二次成功），重建受影响的话并覆盖文件库记录。
-    // 关键：重下必须击穿 legado 图片缓存（fetchItem 的 bust）——legado 的缓存文件名 = MD5(src)，
-    // 且文件已存在时直接返回不重下，否则首次失败写下的坏文件会让重下永远拿到同一张占位图。
+    // 只重下坏图：再请求一次（legado 有缓存，常在第二次成功），重建受影响的话并覆盖文件库记录
     async function legadoReDownload(){
       const bad = IMAGES.filter(it=>it.broken);
       if(!bad.length){ setLegadoStatus('当前没有坏图。'); return; }
       $('#btnReDL').disabled = true; $('#btnBuild').disabled = true;
       legadoCtrl.aborted=false; legadoCtrl.paused=false;
       const b = BOOKS[+$('#legadoBookSel').value];
-      if(!b){ setLegadoStatus('请先选择书籍。'); $('#btnReDL').disabled=false; $('#btnBuild').disabled=false; return; }
       const bookUrl = b.bookUrl || b.url;
       const bookName = (b.name || b.bookName || 'legado') + '';
       const CONC = Math.max(1, Math.min(32, parseInt($('#concInput') && $('#concInput').value, 10) || CONCURRENCY));
-      // 重下期间同样可暂停/取消（与生成一致）
-      $('#btnPause').style.display=''; $('#btnPause').textContent='暂停'; $('#btnPause').classList.add('gray');
-      $('#btnCancel').style.display='';
-      setLegadoProg(0, '坏图重下0/'+bad.length);   // 文字进度与「取图 N/M」同位置
-      setLegadoStatus('正在重新下载坏图…');         // 总提醒只放这一句
       try{
+        setLegadoStatus('重新下载坏图，共 '+bad.length+' 张（并发 '+CONC+'，单图超时 10s、仅重试 1 次）…');
         legadoMemStart();
         let done=0, still=0;
         await runFetch(bad, bookUrl, (p)=>{
-          if(p.phase!=='done') return;                 // 只在完成时推进，进度严格单调
-          done++; if(p.it.broken) still++;
-          setLegadoProg(done/bad.length, '坏图重下'+done+'/'+bad.length);   // 进度条同步跟随
-        }, CONC, { retries:1, timeout: LEGADO_REDL_TIMEOUT, bust:true });
-        if(legadoCtrl.aborted) throw new Error('__ABORT__');   // 取消则不写库，保留已成功部分
-        // 重建受影响的话。注意：生成时「整话全坏被跳过」的话没有文件库记录，这里要补建，
-        // 否则重下成功的图永远写不进任何 PDF。
+          if(p.phase==='done'){ done++; if(p.it.broken) still++; setLegadoStatus('重下坏图 '+done+'/'+bad.length + (still ? '（仍坏'+still+'）' : '')); }
+          setLegadoProg(p.started/bad.length, '重下坏图 '+p.started+'/'+bad.length + (still ? '（仍坏'+still+'）' : ''));
+        }, CONC, { retries:1, timeout: LEGADO_REDL_TIMEOUT });
         const affected = [...new Set(bad.map(it=>it.ci))];
         const files = await dbAllFiles();
-        let rebuilt=0, created=0;
         for(const ci of affected){
-          const items = IMAGES.filter(it=>it.ci===ci);
-          const pages = items.filter(it=>it.data).map(it=>it.data);
-          if(!pages.length) continue;                     // 仍无有效图→不写库
-          const chBroken = items.some(it=>it.broken);
+          const rec = files.find(f=>f.kind==='legado' && f.chapter===ci);
+          if(!rec) continue;
+          const pages = IMAGES.filter(it=>it.ci===ci && it.data).map(it=>it.data);
+          const chBroken = IMAGES.some(it=>it.ci===ci && it.broken);
           const blob = buildPdfBlob(pages);
-          const thumb = pages[0] && pages[0].canvas ? dbMakeThumb(pages[0].canvas) : null;
-          const recs = files.filter(f=>f.kind==='legado' && f.chapter===ci);
-          if(recs.length){
-            for(const rec of recs){
-              await dbPutFile({ ...rec, blob, size: blob.size, broken: chBroken, thumb: rec.thumb || thumb });
-            }
-            rebuilt++;
-          }else{
-            // 补建记录（字段与 legadoBuild 落库一致）
-            const ch = CHAPTERS[ci];
-            const chName = ch ? (ch.name||ch.title||'') : '';
-            await dbPutFile({
-              id: 'f-' + Date.now() + '-' + ci, name: makeFname(bookName, [ci]), size: blob.size,
-              createdAt: new Date().toLocaleString('zh-CN'), blob, kind: 'legado',
-              bookName, chapter: ci, chName, broken: chBroken, seq: ++fileSeq, order: fileSeq, thumb
-            });
-            created++;
-          }
+          const thumb = rec.thumb || (pages[0] && pages[0].canvas ? dbMakeThumb(pages[0].canvas) : null);
+          await dbPutFile({ ...rec, blob, size: blob.size, broken: chBroken, thumb });
         }
         renderFiles();
         if(still){
-          setLegadoStatus('重下完成，仍有 '+still+' 张坏图'+badWhySummary(bad)
-            +'（图源/网络不稳，可再点一次重下）。\n已更新文件库记录。');
+          setLegadoStatus('重下完成，仍有 '+still+' 张坏图（图源/网络不稳，可再点一次重下）。\n已更新文件库记录。');
           $('#btnReDL').textContent='🔄 再试下载坏图 ('+still+')';
         }else{
-          setLegadoStatus('🎉 全部坏图已补回！已更新文件库记录'+(created?'（含补建 '+created+' 话）':'')+'。');
+          setLegadoStatus('🎉 全部坏图已补回！已更新文件库记录。');
           $('#btnReDL').style.display='none';
           // 内存优化：坏图已全部补回，受影响章节已重建写库，取图数据不再需要，立即释放
           IMAGES = [];
         }
-      }catch(e){
-        if(e && e.message==='__ABORT__'){
-          // 取消：不清 IMAGES，已重下成功的数据保留，可再次点击重下继续
-          const left = IMAGES.filter(it=>it.broken).length;
-          if(left){
-            $('#btnReDL').textContent='🔄 再试下载坏图 ('+left+')';
-            setLegadoStatus('已取消重下。已成功的部分保留，还剩 '+left+' 张坏图，可再次点击继续。');
-          }else{
-            $('#btnReDL').style.display='none';
-            setLegadoStatus('已取消重下，但坏图已全部补回（未写库的部分请重新生成）。');
-          }
-        }else{
-          setLegadoStatus('重下出错：'+e.message);
-        }
-      }
-      finally{ legadoMemStop(); $('#btnReDL').disabled=false; $('#btnBuild').disabled=false; legadoHideCtrl(); }
-    }
-
-    // 仍坏图的原因分布（重下完成时汇报，如「（体积过小×2，近乎纯色×1）」）
-    function badWhySummary(bad){
-      const m = {};
-      bad.forEach(it=>{ if(it.broken && it.badWhy) m[it.badWhy]=(m[it.badWhy]||0)+1; });
-      const ks = Object.keys(m);
-      if(!ks.length) return '';
-      return '（'+ks.map(k=>k+'×'+m[k]).join('，')+'）';
+      }catch(e){ setLegadoStatus('重下出错：'+e.message); }
+      finally{ legadoMemStop(); $('#btnReDL').disabled=false; $('#btnBuild').disabled=false; }
     }
 
     // ================= Legado 事件绑定 =================
