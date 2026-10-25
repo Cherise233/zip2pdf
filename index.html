@@ -1456,7 +1456,8 @@
         div.draggable = true;
         div.dataset.id = rec.id;
         const brokenBadge = rec.broken
-          ? '<span style="color:#dc2626"> ⚠️ 含坏图</span>' : '';
+          ? '<span style="color:#dc2626"> ⚠️ 坏图'
+            +(rec.badPages&&rec.badPages.length ? ' P'+rec.badPages.join('、P') : '')+'</span>' : '';
         // 文件库不显示缩略图（缩略图统一在「我的 PDF 库」展示）
         div.innerHTML =
           '<div class="body">' +
@@ -2484,10 +2485,10 @@
           }catch(e){ setLegadoStatus('第'+(ci+1)+'话正文失败：'+e.message+'（跳过）'); continue; }
           const urls = extractImages(content);
           if(!urls.length){ setLegadoStatus('第'+(ci+1)+'话无图片（可能是文字章，跳过）'); continue; }
-          for(const u of urls){
-            IMAGES.push({ ci, chName:(ch.name||ch.title||('第'+ci)), url:u.url, src:u.src,
+          urls.forEach((u, pi)=>{
+            IMAGES.push({ ci, pi, chName:(ch.name||ch.title||('第'+ci)), url:u.url, src:u.src,
                           data:null, broken:false, err:'' });
-          }
+          });
           total += urls.length; readCnt++;
           setLegadoProg(0, '准备中：已读 '+readCnt+'/'+idxs.length+' 话');
         }
@@ -2528,10 +2529,14 @@
           await dbPutFile({
             id: 'f-' + Date.now() + '-' + ci, name, size: blob.size,
             createdAt: new Date().toLocaleString('zh-CN'), blob, kind: 'legado',
-            bookName, chapter: ci, chName, broken: chBroken, seq: ++fileSeq, order: fileSeq, thumb
+            bookName, chapter: ci, chName, broken: chBroken,
+            badPages: chBroken ? chapterItems.filter(it=>it.broken).map(it=>it.pi+1) : [],
+            seq: ++fileSeq, order: fileSeq, thumb
           });
           okChapters++; builtCnt++;
-          setLegadoStatus('✅ 已生成 '+builtCnt+'/'+idxs.length+' 话 PDF（'+chName+'）'+(chBroken ? ' ⚠含坏图' : ''));
+          const badPages = chapterItems.filter(it=>it.broken).map(it=>'P'+(it.pi+1));
+          setLegadoStatus('✅ 已生成 '+builtCnt+'/'+idxs.length+' 话 PDF（'+chName+'）'
+            +(chBroken ? ' ⚠坏图 '+badPages.join('、') : ''));
           setLegadoProg(done/total, '已生成 '+builtCnt+'/'+idxs.length+' 话 PDF');
           renderFiles();   // 文件库实时增长，取消时已完成的话立即可见
           // 无坏图→释放本话 dataUrl+canvas；有坏图→保留供「重下坏图」复用
@@ -2544,8 +2549,9 @@
           setLegadoStatus('全部图片取图失败/坏图。\n最后错误：'+lastErr+'\n把这段报错发我即可定位。');
           $('#btnBuild').disabled=false; legadoHideCtrl(); return;
         }
+        const badPagesTxt = brokenTotal ? '：'+badPagesSummary(IMAGES.filter(it=>it.broken)) : '';
         setLegadoStatus('✅ 完成！已存入文件库 '+okChapters+' 个 PDF（每话一个）'
-          + (brokenTotal ? '，坏图 '+brokenTotal+' 张（点下面按钮可只重下坏图）' : '')
+          + (brokenTotal ? '，坏图 '+brokenTotal+' 张'+badPagesTxt+'（点下面按钮可只重下坏图）' : '')
           + '。\n到下方「📁 文件库」可多选合并 / 下载。');
         // 生成成功后取消章节列表里的勾选
         document.querySelectorAll('#legadoChList input').forEach(cb => { cb.checked = false; });
@@ -2569,6 +2575,23 @@
         }
       }
       finally{ legadoMemStop(); $('#btnBuild').disabled = false; legadoHideCtrl(); }
+    }
+
+    // 坏图页码定位：按话分组列出「话名 第N、M页」，让用户能直接翻到缺页位置。
+    // pi 是章节内图片索引（0 起），+1 成人类页码。条数过多时只列前 maxGroups 组。
+    function badPagesSummary(bad, maxGroups){
+      const groups = new Map();
+      bad.forEach(it=>{
+        if(!it.broken) return;
+        if(!groups.has(it.ci)) groups.set(it.ci, { chName: it.chName || ('第'+(it.ci+1)+'话'), pages: [] });
+        groups.get(it.ci).pages.push((it.pi||0)+1);
+      });
+      const gs = [...groups.values()];
+      if(!gs.length) return '';
+      maxGroups = maxGroups || 4;
+      let s = gs.slice(0, maxGroups).map(g=>g.chName+' 第'+g.pages.join('、')+'页').join('；');
+      if(gs.length > maxGroups) s += '；等 '+gs.length+' 话';
+      return s;
     }
 
     // 只重下坏图：再请求一次（legado 有缓存，常在第二次成功），重建受影响的话并覆盖文件库记录
@@ -2602,7 +2625,9 @@
         }
         renderFiles();
         if(still){
-          setLegadoStatus('重下完成，仍有 '+still+' 张坏图（图源/网络不稳，可再点一次重下）。\n已更新文件库记录。');
+          setLegadoStatus('重下完成，仍有 '+still+' 张坏图'
+            +(badPagesSummary(bad) ? '：'+badPagesSummary(bad) : '')
+            +'（图源/网络不稳，可再点一次重下）。\n已更新文件库记录。');
           $('#btnReDL').textContent='🔄 再试下载坏图 ('+still+')';
         }else{
           setLegadoStatus('🎉 全部坏图已补回！已更新文件库记录。');
