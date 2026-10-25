@@ -286,6 +286,7 @@
           <button class="btn small danger" id="btnCancel" style="display:none; flex:1 1 0">取消</button>
         </div>
         <button class="btn small gray" id="btnReDL" style="display:none; width:100%; margin-bottom:8px">🔄 重新下载坏图</button>
+        <button class="btn small gray" id="btnKeepBroken" style="display:none; width:100%; margin-bottom:8px">📄 把坏图放进文件</button>
         <div class="bar-wrap" id="legadoBarWrap" style="display:block">
           <div class="bar"><div class="bar-fill" id="legadoBarFill"></div></div>
           <div id="legadoProgressText"></div>
@@ -2206,6 +2207,7 @@
     let legadoMemTimer = null;   // 堆内存读数定时器（legado 操作期间自动刷新）
     const legadoCtrl = { aborted:false, paused:false, lastStatus:null };
     const legadoActiveCtrl = new Set();   // 进行中的 fetch 控制器，取消时立即中止在飞请求
+    let brokenInFiles = false;            // 坏图是否已放入文件库 PDF（供检查误判）；true 时按钮为「撤销」
     function legadoHideCtrl(){
       $('#btnPause').style.display='none'; $('#btnCancel').style.display='none';
       $('#btnPause').textContent='暂停';
@@ -2288,6 +2290,8 @@
       $('#legadoProgressText').textContent='';
       setLegadoStatus('');
       $('#btnReDL').style.display='none';
+      $('#btnKeepBroken').style.display='none';
+      brokenInFiles=false;
       $('#btnBuild').disabled=false; legadoHideCtrl();
       try{
         const cs = $('#chLoadStatus'); cs.style.display=''; cs.textContent='读取章节中…';
@@ -2407,9 +2411,9 @@
         try{
           const jpg = await downloadToJpeg(bookUrl, it.src, timeout);
           const broken = jpg.size < PLACEHOLDER_BYTES || jpg.variance < VAR_THRESHOLD;
-          it.data = broken ? null : jpg;
-          it.broken = broken;
-          it.err  = broken ? '坏图/占位图' : '';
+          const keep = opts && opts.keepBroken;   // 检查模式：不论判定都保留数据，且不推翻原判定
+          it.data = (broken && !keep) ? null : jpg;
+          if(!keep){ it.broken = broken; it.err = broken ? '坏图/占位图' : ''; }
           return;
         }catch(e){
           lastErr = e.message;
@@ -2461,7 +2465,8 @@
       if(!idxs.length){ setLegadoStatus('请先勾选至少一话。'); return; }
       // 并发线数从输入框读取（1~32），默认 8
       const CONC = Math.max(1, Math.min(32, parseInt($('#concInput') && $('#concInput').value, 10) || CONCURRENCY));
-      $('#btnBuild').disabled = true; $('#btnReDL').style.display='none';
+      $('#btnBuild').disabled = true; $('#btnReDL').style.display='none'; $('#btnKeepBroken').style.display='none';
+      brokenInFiles=false;
       // 暂停 / 取消 控制：每次生成重置
       legadoCtrl.aborted=false; legadoCtrl.paused=false;
       $('#btnPause').style.display=''; $('#btnPause').textContent='暂停';
@@ -2559,6 +2564,9 @@
         if(brokenTotal){
           $('#btnReDL').style.display='';
           $('#btnReDL').textContent='🔄 重新下载坏图 ('+brokenTotal+')';
+          $('#btnKeepBroken').style.display='';
+          $('#btnKeepBroken').textContent='📄 把坏图放进文件';
+          brokenInFiles=false;
         } else {
           IMAGES = [];   // 无坏图时一次性释放全部取图数据
         }
@@ -2599,6 +2607,9 @@
       const bad = IMAGES.filter(it=>it.broken);
       if(!bad.length){ setLegadoStatus('当前没有坏图。'); return; }
       $('#btnReDL').disabled = true; $('#btnBuild').disabled = true;
+      $('#btnKeepBroken').disabled = true;
+      brokenInFiles=false;
+      $('#btnKeepBroken').textContent='📄 把坏图放进文件';
       legadoCtrl.aborted=false; legadoCtrl.paused=false;
       const b = BOOKS[+$('#legadoBookSel').value];
       const bookUrl = b.bookUrl || b.url;
@@ -2631,16 +2642,82 @@
         if(still){
           setLegadoStatus('重下完成，仍有 '+still+' 张坏图'
             +(badPagesSummary(bad) ? '：'+badPagesSummary(bad) : '')
-            +'（图源/网络不稳，可再点一次重下）。\n已更新文件库记录。');
+            +'（图源/网络不稳，可再点一次重下；也可点「📄 把坏图放进文件」检查是否误判）。\n已更新文件库记录。');
           $('#btnReDL').textContent='🔄 再试下载坏图 ('+still+')';
+          $('#btnKeepBroken').style.display='';
+          $('#btnKeepBroken').textContent='📄 把坏图放进文件';
         }else{
           setLegadoStatus('🎉 全部坏图已补回！已更新文件库记录。');
           $('#btnReDL').style.display='none';
+          $('#btnKeepBroken').style.display='none';
+          brokenInFiles=false;
           // 内存优化：坏图已全部补回，受影响章节已重建写库，取图数据不再需要，立即释放
           IMAGES = [];
         }
       }catch(e){ setLegadoStatus('重下出错：'+e.message); }
-      finally{ legadoMemStop(); $('#btnReDL').disabled=false; $('#btnBuild').disabled=false; }
+      finally{ legadoMemStop(); $('#btnReDL').disabled=false; $('#btnBuild').disabled=false; $('#btnKeepBroken').disabled=false; }
+    }
+
+    // 把坏图放进文件库 / 撤销：
+    // 放进 = 重下坏图并保留数据（fetchItem keepBroken，不论判定）→ 重建受影响话的 PDF（含坏图页），
+    //        供用户打开检查是否误判；按钮变「↩️ 撤销」。
+    // 撤销 = 数据已在内存，直接重建为仅好图（无需再下载）；按钮变回「📄 把坏图放进文件」。
+    async function toggleBrokenInFiles(){
+      const bad = IMAGES.filter(it=>it.broken);
+      if(!bad.length){ setLegadoStatus('当前没有坏图。'); return; }
+      const b = BOOKS[+$('#legadoBookSel').value];
+      if(!b){ setLegadoStatus('请先选择书籍。'); return; }
+      const bookUrl = b.bookUrl || b.url;
+      const CONC = Math.max(1, Math.min(32, parseInt($('#concInput') && $('#concInput').value, 10) || CONCURRENCY));
+      const include = !brokenInFiles;          // true=放进文件，false=撤销
+      $('#btnKeepBroken').disabled = true; $('#btnReDL').disabled = true; $('#btnBuild').disabled = true;
+      legadoCtrl.aborted=false; legadoCtrl.paused=false;
+      try{
+        // 放进文件时，若坏图数据已不在内存（构建时判定即丢弃），需重下并保留
+        const needDl = include && !bad.every(it=>it.data);
+        if(needDl){
+          setLegadoStatus('正在把坏图放进文件库（先重新下载这些图）…');
+          setLegadoProg(0, '坏图入库0/'+bad.length);
+          legadoMemStart();
+          let done=0;
+          await runFetch(bad, bookUrl, (p)=>{
+            if(p.phase!=='done') return;
+            done++;
+            setLegadoProg(done/bad.length, '坏图入库'+done+'/'+bad.length);
+          }, CONC, { retries:1, timeout: LEGADO_REDL_TIMEOUT, keepBroken:true });
+        }
+        // 重建受影响话的 PDF：include=含坏图页，否则仅好图（恢复原样）
+        const affected = [...new Set(bad.map(it=>it.ci))];
+        const files = await dbAllFiles();
+        for(const ci of affected){
+          const rec = files.find(f=>f.kind==='legado' && f.chapter===ci);
+          if(!rec) continue;
+          const pages = IMAGES.filter(it=>it.ci===ci && it.data && (include || !it.broken)).map(it=>it.data);
+          if(!pages.length) continue;
+          const chBroken = IMAGES.some(it=>it.ci===ci && it.broken);
+          const blob = buildPdfBlob(pages);
+          const thumb = rec.thumb || (pages[0] && pages[0].canvas ? dbMakeThumb(pages[0].canvas) : null);
+          await dbPutFile({ ...rec, blob, size: blob.size, broken: chBroken, thumb });
+        }
+        renderFiles();
+        brokenInFiles = include;
+        $('#btnKeepBroken').textContent = include ? '↩️ 撤销' : '📄 把坏图放进文件';
+        if(include){
+          const got = bad.filter(it=>it.data).length;
+          setLegadoStatus('已把 '+got+' 张坏图放进文件库'
+            +(badPagesSummary(bad) ? '（'+badPagesSummary(bad)+'）' : '')
+            +'。打开 PDF 到标记页检查是否误判；点「↩️ 撤销」可收回。');
+        }else{
+          setLegadoStatus('已撤销，文件库恢复为仅好图。');
+        }
+      }catch(e){
+        if(e && e.message==='__ABORT__'){ setLegadoStatus('已取消。'); }
+        else setLegadoStatus('操作出错：'+e.message);
+        brokenInFiles = !include;   // 出错回滚标志，保持与按钮文案一致
+      }finally{
+        legadoMemStop();
+        $('#btnKeepBroken').disabled=false; $('#btnReDL').disabled=false; $('#btnBuild').disabled=false;
+      }
     }
 
     // ================= Legado 事件绑定 =================
@@ -2692,6 +2769,7 @@
         setLegadoStatus('正在取消…');
       });
       $('#btnReDL').addEventListener('click', legadoReDownload);
+      $('#btnKeepBroken').addEventListener('click', toggleBrokenInFiles);
       // 选书：放大镜输入框，输入关键字即时筛选书名/作者
       $('#bookSearch').addEventListener('input', ()=>{
         renderBookOptions($('#bookSearch').value.trim());
