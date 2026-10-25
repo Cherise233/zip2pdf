@@ -2520,6 +2520,9 @@
             if(p.phase==='start' || p.phase==='done') setLegadoMem();
           }, CONC);
           if(legadoCtrl.aborted) throw new Error('__ABORT__');
+          // 同话重复检测：不同 URL 同内容 → 错误图（体积/方差判不出的书源错误图主要靠这条抓）
+          const dupN = markChapterDuplicates(chapterItems);
+          if(dupN) brokenTotal += dupN;
           completedImages += chapterItems.length;   // 本话图数累计入总进度
 
           const pages = chapterItems.filter(it=>it.data).map(it=>it.data);
@@ -2541,7 +2544,7 @@
           okChapters++; builtCnt++;
           const badPages = chapterItems.filter(it=>it.broken).map(it=>'P'+(it.pi+1));
           setLegadoStatus('✅ 已生成 '+builtCnt+'/'+idxs.length+' 话 PDF（'+chName+'）'
-            +(chBroken ? ' ⚠坏图 '+badPages.join('、') : ''));
+            +(chBroken ? ' ⚠坏图 '+badPages.join('、')+(dupN?'（含同话重复错误图 '+dupN+' 张）':'') : ''));
           setLegadoProg(done/total, '已生成 '+builtCnt+'/'+idxs.length+' 话 PDF');
           renderFiles();   // 文件库实时增长，取消时已完成的话立即可见
           // 无坏图→释放本话 dataUrl+canvas；有坏图→保留供「重下坏图」复用
@@ -2551,7 +2554,7 @@
 
         if(!okChapters){
           const lastErr = (IMAGES.find(i=>i.err && i.err!=='坏图/占位图')||{}).err || '占位图';
-          setLegadoStatus('全部图片取图失败/坏图。\n最后错误：'+lastErr+'\n把这段报错发我即可定位。');
+          setLegadoStatus('全部图片取图失败/坏图（整话无有效图时，请检查网络 / legado 连接是否断开）。\n最后错误：'+lastErr+'\n把这段报错发我即可定位。');
           $('#btnBuild').disabled=false; legadoHideCtrl(); return;
         }
         const badPagesTxt = brokenTotal ? '：'+badPagesSummary(IMAGES.filter(it=>it.broken)) : '';
@@ -2602,6 +2605,43 @@
       return s;
     }
 
+    // 内容指纹：同一张图经 legado PNG 化 + 我方 JPEG 重编码后字节完全一致，
+    // 用 size|w|h|variance + dataUrl 采样哈希；不同内容碰撞概率可忽略。
+    function contentFp(jpg){
+      let h = 2166136261;
+      const s = jpg.dataUrl || '';
+      for(let i = 0; i < s.length; i += 97){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+      return jpg.size + '|' + jpg.w + '|' + jpg.h + '|' + (jpg.variance == null ? '?' : jpg.variance.toFixed(4)) + '|' + (h >>> 0).toString(16);
+    }
+
+    // 同话重复检测（零误杀主力判据）：同一话内**不同 URL** 下载到完全相同的内容 → 必为错误图。
+    // 真实漫画页不会重复；网络断开/CDN 故障时整话返回同一张错误图（可能体积、方差都判不出），
+    // 靠此抓回。同一 URL 出现多次属正常引用，跳过。返回抓回的张数。
+    function markChapterDuplicates(items){
+      const byCh = new Map();
+      for(const it of items){
+        if(!it.data || it.broken) continue;          // 只复查「被判为好图」的项
+        if(!byCh.has(it.ci)) byCh.set(it.ci, []);
+        byCh.get(it.ci).push(it);
+      }
+      let n = 0;
+      for(const group of byCh.values()){
+        const seenSrc = new Set(), byFp = new Map();
+        for(const it of group){
+          if(seenSrc.has(it.src)) continue;          // 同 URL 重复 = 同一张图，正常
+          seenSrc.add(it.src);
+          const fp = contentFp(it.data);
+          if(!byFp.has(fp)) byFp.set(fp, []);
+          byFp.get(fp).push(it);
+        }
+        for(const g of byFp.values()){
+          if(g.length < 2) continue;                 // 至少两张不同 URL 同内容才判坏
+          g.forEach(it=>{ it.broken = true; it.err = '同话重复内容'; it.data = null; n++; });
+        }
+      }
+      return n;
+    }
+
     // 只重下坏图：再请求一次（legado 有缓存，常在第二次成功），重建受影响的话并覆盖文件库记录
     async function legadoReDownload(){
       const bad = IMAGES.filter(it=>it.broken);
@@ -2627,6 +2667,10 @@
           done++; if(p.it.broken) still++;
           setLegadoProg(done/bad.length, '坏图重下'+done+'/'+bad.length + (still ? '（仍坏'+still+'）' : ''));
         }, CONC, { retries:1, timeout: LEGADO_REDL_TIMEOUT });
+        // 重下后复查同话重复：源站仍故障时会拿到同一张错误图（体积/方差可能都判不出），
+        // 会被误记为「救回」写进 PDF——这里按重复抓回，并重算仍坏张数
+        markChapterDuplicates(IMAGES);
+        still = bad.filter(it=>it.broken).length;
         const affected = [...new Set(bad.map(it=>it.ci))];
         const files = await dbAllFiles();
         for(const ci of affected){
