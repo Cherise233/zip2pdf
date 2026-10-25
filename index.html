@@ -2676,11 +2676,14 @@
         for(const ci of affected){
           const rec = files.find(f=>f.kind==='legado' && f.chapter===ci);
           if(!rec) continue;
-          const pages = IMAGES.filter(it=>it.ci===ci && it.data).map(it=>it.data);
-          const chBroken = IMAGES.some(it=>it.ci===ci && it.broken);
+          const chapterItems = IMAGES.filter(it=>it.ci===ci);
+          const pages = chapterItems.filter(it=>it.data).map(it=>it.data);
+          const chBroken = chapterItems.some(it=>it.broken);
+          // badPages 按重下后的实时状态重算：部分救回时只列仍坏的页（否则徽章页码过期）
+          const chBadPages = chBroken ? chapterItems.filter(it=>it.broken).map(it=>it.pi+1) : [];
           const blob = buildPdfBlob(pages);
           const thumb = rec.thumb || (pages[0] && pages[0].canvas ? dbMakeThumb(pages[0].canvas) : null);
-          await dbPutFile({ ...rec, blob, size: blob.size, broken: chBroken, thumb });
+          await dbPutFile({ ...rec, blob, size: blob.size, broken: chBroken, badPages: chBadPages, thumb });
         }
         renderFiles();
         if(still){
