@@ -272,7 +272,7 @@
         </div>
         <div class="row" style="margin-bottom:8px">
           <input type="number" id="concInput" value="8" min="1" max="32" style="flex:0 0 96px">
-          <span style="font-size:12px;color:#9ca3af;flex:1;line-height:1.5">并发线数：高→下载快，但易触发图源限流、坏图变多；低→更稳，但更慢。建议 4~8（重下坏图时自动封顶 2，防再触发限流）。</span>
+          <span style="font-size:12px;color:#9ca3af;flex:1;line-height:1.5">并发线数：高→下载快，但易触发图源限流、坏图变多；低→更稳，但更慢。建议 4~8。</span>
         </div>
         <div id="legadoChList" style="max-height:42vh; overflow:auto"></div>
       </div>
@@ -2174,7 +2174,7 @@
     }
 
     // ================= Legado 直连转 PDF =================
-    let BOOKS = [], CHAPTERS = [], SELECTED = new Set(), IMAGES = [], IMG_PHASH = new Map();
+    let BOOKS = [], CHAPTERS = [], SELECTED = new Set(), IMAGES = [];
     let chapterDisplayOrder = 'asc';   // 章节列表显示顺序：asc 正序 / desc 倒序
     let dragFileId = null;             // 文件库拖拽排序：当前拖动的文件 id
     let dropTarget = null;             // 文件库拖拽落点：{ id, before }，供 drop 时定位插入位置
@@ -2189,15 +2189,7 @@
     const PLACEHOLDER_BYTES = 50000;  // ① 字节阈值（占位图约 7KB，真实页通常 >150KB，留足余量）
     const VAR_THRESHOLD = 4;          // ② 全图灰度方差：近乎纯色=占位图/灰块
     const MIN_PAGE_PX = 200;          // ③ 短边下限：低于此视为图标级解码（如被放大的占位图/细长条）
-    const COLOR_MIN = 64;             // ④ 量化色数下限：真实漫画页数百+，「加载失败/防盗链」提示图通常 <30
-    const BG_RATIO_MAX = 0.97;        // ⑤ 众数底色占比上限：提示图=纯色底+几个字（>97%）；配体积上限防误判
-    const BG_SIZE_MAX = 150000;       // ⑤ 仅对 <150KB 的图启用底色判据（真实漫画页通常 ≥150KB，不冒这个险）
     const LEGADO_REDL_TIMEOUT = 10000;  // 重下坏图单图超时：坏图多为死源，缩短空等
-    // ===== 重下坏图的补试策略 =====
-    // 判坏（占位图/体积过小等）后不立刻放弃，自动补试：限流/连接预热型失败几乎必过。
-    const REDL_BROKEN_RETRIES = 2;   // 判坏后的自动补试次数（每次换新 fragment 真重发）
-    const REDL_RETRY_GAP = 1200;     // 补试间隔 ms：避开源站突发限流窗口
-    const REDL_CONC_MAX = 2;         // 重下并发封顶：补救操作放低并发，避免再触发源站限流
 
     const $ = s => document.querySelector(s);
     function setLegadoStatus(t){ $('#legadoStatus').textContent = t; }
@@ -2367,25 +2359,6 @@
       return src.slice(0, comma) + '#__rd' + n + src.slice(comma);
     }
 
-    // 一次采样同时算出四项特征（供坏图判定 + 跨页重复检测用）：
-    //  variance 灰度方差 | colors 量化色数（提示图极少） | bgRatio 众数底色占比 | phash 内容指纹
-    // step 为采样步长（按目标约 2000 个采样点折算）。同尺寸同内容 → phash 必同。
-    function pixelStats(data, step){
-      let sum=0, n=0; const bins=new Map(); let phash=0;
-      for(let i=0;i<data.length;i+=4*step){
-        const r=data[i], g=data[i+1], b=data[i+2];
-        sum += (r+g+b)/3; n++;
-        const key = ((r>>5)<<10)|((g>>5)<<5)|(b>>5);   // 每通道 32 级量化
-        bins.set(key,(bins.get(key)||0)+1);
-        phash = (phash ^ (r*3 + g*5 + b*7 + i)) * 16777619 >>> 0;   // FNV-1a
-      }
-      if(!n) return { variance:999, colors:9999, bgRatio:0, phash:0 };
-      const mean=sum/n; let s=0;
-      for(let i=0;i<data.length;i+=4*step){ const v=(data[i]+data[i+1]+data[i+2])/3-mean; s+=v*v; }
-      let mx=0; bins.forEach(v=>{ if(v>mx) mx=v; });
-      return { variance:Math.sqrt(s/n), colors:bins.size, bgRatio:mx/n, phash };
-    }
-
     function blobToJpeg(blob){
       return new Promise((resolve,reject)=>{
         const url = URL.createObjectURL(blob);
@@ -2399,14 +2372,17 @@
           ctx.drawImage(img,0,0);
           URL.revokeObjectURL(url);
           // 不去糊：保持原图入文件库，去糊推迟到「文件库合并 → 放入 PDF 库」（并发热路径做重计算会卡 UI）
-          let st = { variance:999, colors:9999, bgRatio:0, phash:0 };
+          let variance = 999;
           try{
             const step = Math.max(1, Math.floor((w*h)/2000));
-            st = pixelStats(c.getContext('2d').getImageData(0,0,w,h).data, step);
+            const data = c.getContext('2d').getImageData(0,0,w,h).data;
+            let sum=0, n=0;
+            for(let i=0;i<data.length;i+=4*step){ sum+=(data[i]+data[i+1]+data[i+2])/3; n++; }
+            const mean=sum/n; let s=0;
+            for(let i=0;i<data.length;i+=4*step){ const v=(data[i]+data[i+1]+data[i+2])/3-mean; s+=v*v; }
+            variance=Math.sqrt(s/n);
           }catch(_){}
-          resolve({ dataUrl:c.toDataURL('image/jpeg',0.92), w, h,
-                    variance:st.variance, colors:st.colors, bgRatio:st.bgRatio, phash:st.phash,
-                    size: blob.size, canvas: c });
+          resolve({ dataUrl:c.toDataURL('image/jpeg',0.92), w, h, variance, size: blob.size, canvas: c });
         };
         img.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error('图片解码失败')); };
         img.src = url;
@@ -2445,70 +2421,39 @@
       return await blobToJpeg(blob);
     }
 
-    // 坏图判定：返回原因串（null=正常图）。
-    // ⚠️ 认知（2026-10-25 实测）：判据里的 size 是 **legado /image 响应的体积**，而 legado 用
-    // Bitmap.compress(PNG,100) 无损重编码。书源错误图多为 JPEG（带压缩噪点），PNG 化后体积
-    // 暴涨 3~10 倍（实测同图：595px JPEG 35.8KB→PNG 109.6KB；1440px→289KB），已与真实漫画页
-    // 的 PNG 体积区间（150KB~2MB）重叠——所以①只对「legado 自家扁平 errorBitmap（6.9KB）」有效，
-    // 对书源 JPEG 错误图基本无效。④「色彩过少」与体积/尺寸/格式完全解耦（实测同图任意放大/
-    // 重压缩量化色数恒为 8），才是通用主力判据。
-    // ① 体积过小：legado 自家占位图约 7KB；真实漫画页 PNG 通常 >150KB。
-    // ④ 色彩过少：真实漫画页量化后仍有数百种色，「加载失败/防盗链/点击重试」类提示图通常 <30 种。
-    // ⑤ 大面积纯底色：提示图=纯色底+几个字（众色占比 >97%）；仅对 <150KB 的图启用，避免误伤白底漫画。
+    // 坏图判定：返回原因串（null=正常图）。首要信号是「文件体积过小」——legado 占位图约 7KB，
+    // 真实漫画页 PNG 通常 >150KB，差 20 倍以上；方差/尺寸为兜底信号。
     function judgeBroken(jpg){
       if(jpg.size < PLACEHOLDER_BYTES) return '体积过小';               // ① 占位图/半截图/小图（首要）
       if(jpg.variance < VAR_THRESHOLD) return '近乎纯色';               // ② 纯色/灰块
       if(jpg.w < MIN_PAGE_PX || jpg.h < MIN_PAGE_PX) return '尺寸过小'; // ③ 图标级解码（放大的占位图）
-      if(jpg.colors != null && jpg.colors < COLOR_MIN) return '色彩过少';           // ④ 提示图/图标
-      if(jpg.bgRatio != null && jpg.bgRatio > BG_RATIO_MAX && jpg.size < BG_SIZE_MAX)
-        return '大面积纯底色';                                          // ⑤ 文字提示图
       return null;
     }
 
     async function fetchItem(bookUrl, it, opts){
       const retries = (opts && opts.retries != null) ? opts.retries : RETRIES;
       const timeout = (opts && opts.timeout != null) ? opts.timeout : LEGADO_TIMEOUT;
-      // 重下专用：判坏（占位图/体积过小等）后不立刻放弃，自动补试 brokenRetries 次——
-      // 图源突发限流、网络恢复后的连接预热，几乎必过。每次尝试都换新 fragment 真重发
-      //（bust 模式下 rdSeq 递增 → MD5(src) 变 → legado 缓存未命中 → 重新下载），
-      // 且补试前间隔 REDL_RETRY_GAP ms 避开限流窗口。网络错误只在 retries 内重试，不占补试次数。
-      const brokenRetries = (opts && opts.brokenRetries != null) ? opts.brokenRetries : 0;
-      let lastErr='', brokenLeft = brokenRetries;
-      for(let a=0; a<retries + brokenRetries; a++){
+      // 重下时击穿 legado 图片缓存（bust=true）：每次重下换一个新 fragment，迫使 legado
+      // 重新下载，而不是把首次失败写下的坏文件/缓存占位图再吐一遍。
+      const bust = (opts && opts.bust) ? (it.rdSeq = (it.rdSeq || 0) + 1) : 0;
+      const useSrc = bust ? bustSrc(it.src, bust) : it.src;
+      let lastErr='';
+      for(let a=0; a<retries; a++){
         if(legadoCtrl.aborted) break;   // 取消后不再重试
-        const bust = (opts && opts.bust) ? (it.rdSeq = (it.rdSeq || 0) + 1) : 0;
-        const useSrc = bust ? bustSrc(it.src, bust) : it.src;
         try{
           const jpg = await downloadToJpeg(bookUrl, useSrc, timeout);
-          // 同话跨页重复检测：同一话里两张不同 URL 的图内容完全相同 → 必为占位/错误图
-          //（真实漫画页不可能两页完全一致；图源对失败请求返回同一张图时必然撞车）。
-          // key 含 ci：只与同话其他页比对，避免跨话扉页重复误伤。
-          const pk = it.ci + '|' + jpg.phash + ':' + jpg.w + 'x' + jpg.h;
-          const seen = (IMG_PHASH.get(pk) || 0) + 1;
-          IMG_PHASH.set(pk, seen);
-          const why = seen > 1 ? '重复图' : judgeBroken(jpg);
-          if(!why){                        // 正常图：成功返回
-            it.data = jpg; it.broken = false; it.err = ''; it.badWhy = '';
-            return;
-          }
-          // 判坏：记录原因；还有补试机会 → 间隔后带新 fragment 重发
-          it.data=null; it.broken=true; it.err='坏图/占位图'; it.badWhy=why;
-          if(brokenLeft > 0){ brokenLeft--; await legadoSleep(REDL_RETRY_GAP); continue; }
+          const why = judgeBroken(jpg);
+          it.data = why ? null : jpg;
+          it.broken = !!why;
+          it.err  = why ? '坏图/占位图' : '';
+          it.badWhy = why || '';        // 判坏原因，供重下完成时汇总汇报
           return;
         }catch(e){
           lastErr = e.message;
-          if(a < retries-1) continue;      // 网络错误重试；耗尽则结束（不占用补试次数）
-          break;
+          if(a < retries-1) continue;   // 网络错误才重试；占位图不重试（浪费）
         }
       }
       it.data=null; it.broken=true; it.err=lastErr;
-    }
-
-    function legadoSleep(ms){ return new Promise(res=>setTimeout(res, ms)); }
-    // 重下并发封顶 REDL_CONC_MAX（生成仍用输入框原值）：补救操作放低并发，避免再触发源站限流
-    function redlConc(){
-      const v = parseInt($('#concInput') && $('#concInput').value, 10) || CONCURRENCY;
-      return Math.max(1, Math.min(REDL_CONC_MAX, v));
     }
 
     // onProg({started, done, total, it, phase:'start'|'done'})：用 started 推进进度，慢图期间进度条仍活动
@@ -2560,7 +2505,6 @@
       $('#btnPause').classList.add('gray');
       $('#btnCancel').style.display='';
       IMAGES = [];
-      IMG_PHASH.clear();   // 重置同话重复检测（否则再次生成同一本书会全被判「重复图」）
       // 进度条恢复开始状态
       setLegadoProg(0, '准备中…');
       $('#legadoMem').textContent='';   // 清空上次的调试内存读数
@@ -2676,14 +2620,13 @@
     async function legadoReDownload(){
       const bad = IMAGES.filter(it=>it.broken);
       if(!bad.length){ setLegadoStatus('当前没有坏图。'); return; }
-      IMG_PHASH.clear();   // 重复检测只基于当批坏图，保证原因汇报准确
       $('#btnReDL').disabled = true; $('#btnBuild').disabled = true;
       legadoCtrl.aborted=false; legadoCtrl.paused=false;
       const b = BOOKS[+$('#legadoBookSel').value];
       if(!b){ setLegadoStatus('请先选择书籍。'); $('#btnReDL').disabled=false; $('#btnBuild').disabled=false; return; }
       const bookUrl = b.bookUrl || b.url;
       const bookName = (b.name || b.bookName || 'legado') + '';
-      const CONC = redlConc();   // 重下封顶低并发：避免再触发图源限流
+      const CONC = Math.max(1, Math.min(32, parseInt($('#concInput') && $('#concInput').value, 10) || CONCURRENCY));
       // 重下期间同样可暂停/取消（与生成一致）
       $('#btnPause').style.display=''; $('#btnPause').textContent='暂停'; $('#btnPause').classList.add('gray');
       $('#btnCancel').style.display='';
@@ -2696,7 +2639,7 @@
           if(p.phase!=='done') return;                 // 只在完成时推进，进度严格单调
           done++; if(p.it.broken) still++;
           setLegadoProg(done/bad.length, '坏图重下'+done+'/'+bad.length);   // 进度条同步跟随
-        }, CONC, { retries:1, timeout: LEGADO_REDL_TIMEOUT, bust:true, brokenRetries: REDL_BROKEN_RETRIES });
+        }, CONC, { retries:1, timeout: LEGADO_REDL_TIMEOUT, bust:true });
         if(legadoCtrl.aborted) throw new Error('__ABORT__');   // 取消则不写库，保留已成功部分
         // 重建受影响的话。注意：生成时「整话全坏被跳过」的话没有文件库记录，这里要补建，
         // 否则重下成功的图永远写不进任何 PDF。
